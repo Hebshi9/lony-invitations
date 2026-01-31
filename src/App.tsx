@@ -23,6 +23,7 @@ import WhatsAppSender from './pages/WhatsAppSender';
 import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import EventSummary from './pages/EventSummary';
 import Login from './pages/Login';
 import { Loader2 } from 'lucide-react';
 
@@ -85,6 +86,7 @@ const AppContent: React.FC = () => {
                 <Route path="/quick-upload" element={<QuickWhatsAppUpload />} />
                 <Route path="/external-upload" element={<ExternalCardsUpload />} />
                 <Route path="/analytics" element={<AnalyticsDashboard />} />
+                <Route path="/event-summary/:eventId" element={<EventSummary />} />
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
             </Routes>
         </Layout>

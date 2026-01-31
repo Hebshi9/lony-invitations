@@ -11,6 +11,7 @@ import UnifiedInvitationStudio from './pages/UnifiedInvitationStudio';
 import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
 import Scanner from './pages/Scanner';
+import EventScanner from './pages/EventScanner';
 import GuestVerification from './pages/GuestVerification';
 import VerifyGuest from './pages/VerifyGuest';
 import InspectorLogin from './pages/InspectorLogin';
@@ -53,6 +54,7 @@ const AppContent: React.FC = () => {
                 <Route path="/client/login" element={<ClientLogin />} />
                 <Route path="/client/dashboard/:eventId" element={<ClientDashboard />} />
                 <Route path="/scanner" element={<Scanner />} />
+                <Route path="/scanner/:token" element={<EventScanner />} />
                 <Route path="/v/:qr_token" element={<GuestView />} />
                 <Route path="/verify/:guestId" element={<GuestVerification />} />
                 <Route path="/invite/:uuid" element={<GuestLanding />} />

@@ -319,7 +319,7 @@ const UnifiedInvitationStudio: React.FC<UnifiedInvitationStudioProps> = ({ event
             ctx.globalAlpha = (el.opacity ?? 100) / 100;
 
             if (el.type === 'qr') {
-                const qrUrl = `https://lony-invites.com/v/${guest.qr_token || guest.id}`;
+                const qrUrl = `https://lonyinvite.netlify.app/check-in.html?token=${guest.qr_token || guest.id}`;
                 const size = el.width || el.fontSize || 150;
 
                 // For simplified export, we use basic QR square shapes

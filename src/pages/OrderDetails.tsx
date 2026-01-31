@@ -113,7 +113,7 @@ const OrderDetails: React.FC = () => {
                     const dotShape = el.qrDotShape || 'square';
                     const color = el.qrColor || '#000000';
                     const bgColor = el.qrBgColor || '#ffffff';
-                    const value = `https://lony-invites.com/v/${guest.qr_token}`;
+                    const value = `https://lonyinvite.netlify.app/check-in.html?token=${guest.qr_token}`;
 
                     // Create off-screen canvas for QR
                     const qrCanvas = document.createElement('canvas');

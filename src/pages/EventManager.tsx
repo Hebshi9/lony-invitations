@@ -3,6 +3,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button';
 import { supabase } from '../lib/supabaseClient';
 import { Calendar, MapPin, Type, Loader2, CheckCircle, QrCode, Clock } from 'lucide-react';
+import FeaturesSelector from '../components/FeaturesSelector';
+import { EventFeatures, DEFAULT_FEATURES } from '../lib/features';
 
 const EventManager: React.FC = () => {
     const [name, setName] = useState('');
@@ -15,10 +17,9 @@ const EventManager: React.FC = () => {
     const [message, setMessage] = useState('');
     const [generatedToken, setGeneratedToken] = useState('');
 
-    // Package Settings
-    const [packageType, setPackageType] = useState('premium');
+    // Features State
+    const [features, setFeatures] = useState<Partial<EventFeatures>>(DEFAULT_FEATURES);
     const [hostPin, setHostPin] = useState('');
-    const [enableSimpleScan, setEnableSimpleScan] = useState(false);
 
     // QR Settings State
     const [qrSettings, setQrSettings] = useState({
@@ -61,12 +62,11 @@ const EventManager: React.FC = () => {
                     date,
                     venue,
                     token,
-                    package_type: packageType,
-                    host_pin: hostPin,
-                    enable_simple_scan: enableSimpleScan,
+                    host_pin: features.enable_host_pin ? hostPin : null,
                     activation_time: activationTimestamp,
                     opening_time: openingTimestamp,
                     country,
+                    features: features,
                     settings: {
                         qr_fields: {
                             ...qrSettings,
@@ -86,8 +86,7 @@ const EventManager: React.FC = () => {
             setActivationTime('');
             setOpeningTime('13:00');
             setHostPin('');
-            setPackageType('premium');
-            setEnableSimpleScan(false);
+            setFeatures(DEFAULT_FEATURES);
             setQrSettings({
                 show_name: true,
                 show_table: true,
@@ -117,47 +116,29 @@ const EventManager: React.FC = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="space-y-8">
-                    <Card className="border-none shadow-xl bg-white/80 backdrop-blur">
-                        <CardHeader className="border-b border-gray-100 pb-4">
-                            <CardTitle className="text-xl text-lony-navy flex items-center gap-2">
-                                <CheckCircle className="w-5 h-5 text-lony-gold" />
-                                نوع الباقة (Package)
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-6 pt-6">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div
-                                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${packageType === 'standard' ? 'border-lony-gold bg-yellow-50' : 'border-gray-100 hover:border-blue-200'}`}
-                                    onClick={() => { setPackageType('standard'); setEnableSimpleScan(true); }}
-                                >
-                                    <h3 className="font-bold text-lg mb-1">Standard (مسح تلقائي)</h3>
-                                    <p className="text-xs text-gray-500">للحفلات البسيطة. مسح بالكاميرا العادية بدون تطبيق.</p>
-                                </div>
-                                <div
-                                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${packageType === 'premium' ? 'border-lony-gold bg-yellow-50' : 'border-gray-100 hover:border-blue-200'}`}
-                                    onClick={() => { setPackageType('premium'); setEnableSimpleScan(false); }}
-                                >
-                                    <h3 className="font-bold text-lg mb-1">Premium (تطبيق)</h3>
-                                    <p className="text-xs text-gray-500">للحفلات الكبيرة. يتطلب تطبيق المشرفين والماسح الضوئي.</p>
-                                </div>
-                            </div>
-
-                            {packageType === 'standard' && (
-                                <div className="space-y-2 animate-in slide-in-from-top-2">
-                                    <label className="text-sm font-medium text-gray-600">الرقم السري للمضيف (Host PIN)</label>
-                                    <input
-                                        type="text"
-                                        maxLength={4}
-                                        className="w-full pr-4 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold"
-                                        placeholder="مثال: 1234"
-                                        value={hostPin}
-                                        onChange={(e) => setHostPin(e.target.value)}
-                                    />
-                                    <p className="text-xs text-gray-400">سيطلب منك هذا الرقم عند تفعيل وضع المسح التلقائي بالجوال.</p>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
+                    {/* Host PIN (only if feature enabled) */}
+                    {features.enable_host_pin && (
+                        <Card className="border-none shadow-xl bg-white/80 backdrop-blur">
+                            <CardHeader className="border-b border-gray-100 pb-4">
+                                <CardTitle className="text-xl text-lony-navy flex items-center gap-2">
+                                    <CheckCircle className="w-5 h-5 text-lony-gold" />
+                                    رمز المضيف (Host PIN)
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4 pt-6">
+                                <label className="text-sm font-medium text-gray-600">الرقم السري للمضيف</label>
+                                <input
+                                    type="text"
+                                    maxLength={4}
+                                    className="w-full pr-4 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold"
+                                    placeholder="مثال: 1234"
+                                    value={hostPin}
+                                    onChange={(e) => setHostPin(e.target.value)}
+                                />
+                                <p className="text-xs text-gray-400">سيطلب منك هذا الرقم للتحكم الكامل</p>
+                            </CardContent>
+                        </Card>
+                    )}
 
                     <Card className="border-none shadow-xl bg-white/80 backdrop-blur">
                         <CardHeader className="border-b border-gray-100 pb-4">
@@ -194,34 +175,36 @@ const EventManager: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-600">وقت تفعيل الدخول (Activation)</label>
-                                    <div className="relative">
-                                        <Clock className="absolute right-3 top-3 w-5 h-5 text-gray-400" />
-                                        <input
-                                            type="time"
-                                            className="w-full pr-10 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 focus:border-lony-gold transition-all"
-                                            value={activationTime}
-                                            onChange={(e) => setActivationTime(e.target.value)}
-                                        />
+                            {features.qr_time_restricted && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-gray-600">وقت تفعيل الدخول (Activation)</label>
+                                        <div className="relative">
+                                            <Clock className="absolute right-3 top-3 w-5 h-5 text-gray-400" />
+                                            <input
+                                                type="time"
+                                                className="w-full pr-10 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 focus:border-lony-gold transition-all"
+                                                value={activationTime}
+                                                onChange={(e) => setActivationTime(e.target.value)}
+                                            />
+                                        </div>
+                                        <p className="text-xs text-gray-400">الوقت الذي يسمح فيه بالمسح</p>
                                     </div>
-                                    <p className="text-xs text-gray-400">الوقت الذي يسمح فيه بالمسح</p>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-600">وقت فتح القاعة (Opening)</label>
-                                    <div className="relative">
-                                        <Clock className="absolute right-3 top-3 w-5 h-5 text-gray-400" />
-                                        <input
-                                            type="time"
-                                            className="w-full pr-10 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 focus:border-lony-gold transition-all"
-                                            value={openingTime}
-                                            onChange={(e) => setOpeningTime(e.target.value)}
-                                        />
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-gray-600">وقت فتح القاعة (Opening)</label>
+                                        <div className="relative">
+                                            <Clock className="absolute right-3 top-3 w-5 h-5 text-gray-400" />
+                                            <input
+                                                type="time"
+                                                className="w-full pr-10 pl-4 py-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 focus:border-lony-gold transition-all"
+                                                value={openingTime}
+                                                onChange={(e) => setOpeningTime(e.target.value)}
+                                            />
+                                        </div>
+                                        <p className="text-xs text-gray-400">الوقت الذي يظهر في البطاقة</p>
                                     </div>
-                                    <p className="text-xs text-gray-400">الوقت الذي يظهر في البطاقة</p>
                                 </div>
-                            </div>
+                            )}
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-gray-600">الدولة / المنطقة الزمنية</label>
@@ -310,6 +293,12 @@ const EventManager: React.FC = () => {
                             </label>
                         </CardContent>
                     </Card>
+
+                    {/* Features Selector - NEW */}
+                    <FeaturesSelector
+                        features={features}
+                        onChange={setFeatures}
+                    />
 
                     <Button
                         onClick={handleSubmit}

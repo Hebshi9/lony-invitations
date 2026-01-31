@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { Download, MapPin, Calendar, Clock, checkCircle } from 'lucide-react';
+import { Download, MapPin, Calendar, Clock, Lock, AlertCircle } from 'lucide-react';
+import { hasFeature, EventFeatures } from '../lib/features';
 
 interface GuestData {
     id: string;
@@ -15,10 +16,11 @@ interface GuestData {
 interface EventData {
     id: string;
     name: string;
-    event_date: string; // Adjusted from start_date based on likely requirement, check schema if error
+    event_date: string;
     location_name?: string;
     location_maps_url?: string;
-    background_url?: string; // For page custom styling
+    background_url?: string;
+    features?: Partial<EventFeatures>;
 }
 
 export default function GuestLanding() {
@@ -79,6 +81,30 @@ export default function GuestLanding() {
             <div className="min-h-screen bg-studio-ivory flex flex-col items-center justify-center p-4 text-center">
                 <h1 className="text-2xl font-bold text-red-600 mb-2">تنبيه</h1>
                 <p className="text-gray-600">{error || 'بيانات الدعوة غير متوفرة'}</p>
+            </div>
+        );
+    }
+
+    // Check if simple scan (guest preview) is enabled
+    if (event && !hasFeature(event, 'enable_simple_scan')) {
+        return (
+            <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+                <div className="max-w-md bg-white rounded-xl p-8 text-center">
+                    <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">معاينة الدعوة غير متاحة</h2>
+                    <p className="text-gray-600 mb-6">
+                        معاينة الدعوة للضيوف غير مفعلة لهذا الحدث.
+                    </p>
+                    <div className="bg-blue-50 rounded-lg p-4 text-right">
+                        <div className="flex items-start gap-2">
+                            <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                            <div className="text-sm text-blue-800">
+                                <p className="font-bold mb-1">للدخول:</p>
+                                <p>قم بإظهار الرمز للمشرفين عند الوصول</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }

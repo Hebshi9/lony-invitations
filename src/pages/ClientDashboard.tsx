@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Card, CardContent } from '../components/ui/Card';
-import { Loader2, Users, CheckCircle, PieChart, Activity } from 'lucide-react';
+import { Loader2, Users, CheckCircle, Activity, Lock } from 'lucide-react';
+import { hasFeature } from '../lib/features';
 
 const ClientDashboard: React.FC = () => {
     const { eventId } = useParams<{ eventId: string }>();
@@ -10,6 +11,7 @@ const ClientDashboard: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [totalGuests, setTotalGuests] = useState(0);
     const [attendedGuests, setAttendedGuests] = useState(0);
+    const [event, setEvent] = useState<any>(null);
 
     useEffect(() => {
         fetchStats();
@@ -20,6 +22,16 @@ const ClientDashboard: React.FC = () => {
 
     const fetchStats = async () => {
         try {
+            // Get event first
+            const { data: eventData, error: eventError } = await supabase
+                .from('events')
+                .select('*')
+                .eq('id', eventId)
+                .single();
+
+            if (eventError) throw eventError;
+            setEvent(eventData);
+
             // Get total count
             const { count: total, error: err1 } = await supabase
                 .from('guests')
@@ -42,6 +54,7 @@ const ClientDashboard: React.FC = () => {
             setLoading(false);
         } catch (e) {
             console.error(e);
+            setLoading(false);
         }
     };
 
@@ -50,6 +63,28 @@ const ClientDashboard: React.FC = () => {
             <Loader2 className="animate-spin text-lony-gold w-10 h-10" />
         </div>
     );
+
+    // Check if client dashboard feature is enabled
+    if (event && !hasFeature(event, 'client_dashboard')) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">
+                <Card className="max-w-md">
+                    <CardContent className="p-8 text-center">
+                        <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">لوحة العميل غير متاحة</h2>
+                        <p className="text-gray-600 mb-6">
+                            لوحة العميل المباشرة غير مفعلة لهذا الحدث.
+                        </p>
+                        <div className="bg-blue-50 rounded-lg p-4 text-right">
+                            <p className="text-sm text-blue-800">
+                                💡 يمكن تفعيل هذه الميزة من إعدادات الحدث
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
 
     const percentage = totalGuests > 0 ? Math.round((attendedGuests / totalGuests) * 100) : 0;
 

@@ -225,6 +225,49 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
         }
     };
 
+    // 🆕 Layer Management Functions
+    const moveLayer = (index: number, direction: 'up' | 'down') => {
+        const newElements = [...elements];
+        if (direction === 'up' && index > 0) {
+            [newElements[index], newElements[index - 1]] = [newElements[index - 1], newElements[index]];
+        } else if (direction === 'down' && index < elements.length - 1) {
+            [newElements[index], newElements[index + 1]] = [newElements[index + 1], newElements[index]];
+        }
+        setElements(newElements);
+    };
+
+    const moveToFront = (id: string) => {
+        const element = elements.find(el => el.id === id);
+        if (element) {
+            setElements([...elements.filter(el => el.id !== id), element]);
+        }
+    };
+
+    const moveToBack = (id: string) => {
+        const element = elements.find(el => el.id === id);
+        if (element) {
+            setElements([element, ...elements.filter(el => el.id !== id)]);
+        }
+    };
+
+    // 🆕 Duplicate Element
+    const duplicateElement = (id: string | null) => {
+        if (!id) return;
+        const element = elements.find(el => el.id === id);
+        if (element) {
+            const newElement: CanvasElement = {
+                ...element,
+                id: crypto.randomUUID(),
+                x: snap(element.x + 5), // Offset slightly
+                y: snap(element.y + 5),
+                label: `${element.label} (نسخة)`
+            };
+            setElements([...elements, newElement]);
+            setSelectedElementId(newElement.id);
+        }
+    };
+
+
     const handleMouseDown = (e: React.MouseEvent, id: string, handle?: string) => {
         e.stopPropagation();
         setSelectedElementId(id);
@@ -308,6 +351,41 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
             window.removeEventListener('mouseup', handleMouseUp);
         };
     }, [dragRef.current, resizeRef.current, isResizing, snapToGrid]);
+
+    // 🆕 Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (!selectedElementId) return;
+
+            // Delete: حذف
+            if (e.key === 'Delete') {
+                deleteElement(selectedElementId);
+            }
+
+            // Ctrl+D: نسخ
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                duplicateElement(selectedElementId);
+            }
+
+            // Arrow Keys: تحريك دقيق
+            if (e.key.startsWith('Arrow')) {
+                e.preventDefault();
+                const step = e.shiftKey ? 10 : 1;
+                const element = elements.find(el => el.id === selectedElementId);
+                if (element) {
+                    updateElement(selectedElementId, {
+                        x: e.key === 'ArrowLeft' ? element.x - step : e.key === 'ArrowRight' ? element.x + step : element.x,
+                        y: e.key === 'ArrowUp' ? element.y - step : e.key === 'ArrowDown' ? element.y + step : element.y,
+                    });
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedElementId, elements]);
+
 
     const handleSave = async () => {
         setSaving(true);
@@ -410,16 +488,68 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
                                             <label className="text-xs font-medium text-gray-500">المحتوى</label>
                                             <input className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-200" value={selectedElement.content || ''} onChange={(e) => updateElement(selectedElement.id, { content: e.target.value })} placeholder="أدخل النص هنا..." />
 
-                                            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto mb-2 p-1 border rounded bg-gray-50">
-                                                {availableFields?.map(field => (
-                                                    <button key={field} onClick={() => {
-                                                        const current = selectedElement.content || '';
-                                                        updateElement(selectedElement.id, { content: current + ` {${field}}` })
-                                                    }}
-                                                        className="text-[10px] bg-white border hover:bg-lony-gold hover:text-white px-2 py-1 rounded shadow-sm transition-colors">
-                                                        +{field}
-                                                    </button>
-                                                ))}
+                                            <div className="space-y-2">
+                                                {/* Basic Fields */}
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block mb-1">
+                                                        حقول أساسية
+                                                    </label>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {['name', 'phone', 'table', 'companions'].map(field => (
+                                                            <button
+                                                                key={field}
+                                                                onClick={() => {
+                                                                    const current = selectedElement.content || '';
+                                                                    updateElement(selectedElement.id, { content: current + ` {${field}}` })
+                                                                }}
+                                                                className="text-[10px] bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 border px-2 py-1 rounded transition font-medium"
+                                                                title={`إضافة ${field}`}
+                                                            >
+                                                                +{field}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Custom Excel Fields */}
+                                                {availableFields && availableFields.length > 0 && (
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-green-600 uppercase tracking-wide block mb-1 flex items-center gap-1">
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                            </svg>
+                                                            حقول Excel ({availableFields.length})
+                                                        </label>
+                                                        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto p-1 border border-green-200 rounded bg-green-50">
+                                                            {availableFields.map(field => (
+                                                                <button
+                                                                    key={field}
+                                                                    onClick={() => {
+                                                                        const current = selectedElement.content || '';
+                                                                        updateElement(selectedElement.id, { content: current + ` {${field}}` })
+                                                                    }}
+                                                                    className="text-[10px] bg-white border-green-300 text-green-700 hover:bg-green-100 border px-2 py-1 rounded shadow-sm transition font-medium"
+                                                                    title={`إضافة حقل ${field} من Excel`}
+                                                                >
+                                                                    +{field}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-[9px] text-gray-500 mt-1 flex items-center gap-0.5">
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                            </svg>
+                                                            اضغط على الحقل لإضافته للنص
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                {/* No Excel Fields Message */}
+                                                {(!availableFields || availableFields.length === 0) && (
+                                                    <div className="p-2 border border-dashed border-gray-300 rounded bg-gray-50 text-center">
+                                                        <p className="text-[10px] text-gray-400">لا توجد حقول مخصصة من Excel</p>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
 
@@ -618,6 +748,140 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 </div>
             </div>
 
+            {/* 🆕 Layers Panel - Sidebar */}
+            <div className="w-64 bg-white border-l flex flex-col h-full shadow-xl overflow-hidden">
+                {/* Header */}
+                <div className="p-3 border-b bg-gradient-to-r from-blue-50 to-purple-50">
+                    <h3 className="font-bold text-sm text-gray-700 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                        الطبقات ({elements.length})
+                    </h3>
+                </div>
+
+                {/* Layers List */}
+                <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    {elements.length === 0 ? (
+                        <div className="text-center py-12 text-gray-400">
+                            <Type className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                            <p className="text-xs">لا توجد عناصر</p>
+                            <p className="text-xs mt-1">أضف نص أو QR</p>
+                        </div>
+                    ) : (
+                        elements.map((el, index) => (
+                            <div
+                                key={el.id}
+                                className={`group p-2 rounded cursor-pointer transition-all border ${selectedElementId === el.id
+                                    ? 'bg-blue-50 border-blue-300 shadow-sm'
+                                    : 'hover:bg-gray-50 border-transparent hover:border-gray-200'
+                                    }`}
+                                onClick={() => setSelectedElementId(el.id)}
+                            >
+                                <div className="flex items-center gap-2">
+                                    {/* Icon */}
+                                    <div className={`p-1.5 rounded ${el.type === 'qr' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                        {el.type === 'qr' ? (
+                                            <QrCode className="w-3.5 h-3.5" />
+                                        ) : (
+                                            <Type className="w-3.5 h-3.5" />
+                                        )}
+                                    </div>
+
+                                    {/* Label */}
+                                    <span className="flex-1 text-xs font-medium truncate">
+                                        {el.label}
+                                    </span>
+
+                                    {/* Layer Controls */}
+                                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                moveLayer(index, 'up');
+                                            }}
+                                            disabled={index === 0}
+                                            className="p-0.5 hover:bg-blue-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                            title="للأعلى"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                moveLayer(index, 'down');
+                                            }}
+                                            disabled={index === elements.length - 1}
+                                            className="p-0.5 hover:bg-blue-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                            title="للأسفل"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Z-index Indicators */}
+                                <div className="flex gap-1 mt-1 text-[10px] text-gray-400">
+                                    <span>من {elements.length}</span>
+                                    <span>•</span>
+                                    <span>الطبقة #{elements.length - index}</span>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* Quick Actions Footer */}
+                {selectedElementId && (
+                    <div className="p-2 border-t bg-gray-50">
+                        <div className="grid grid-cols-2 gap-1">
+                            <button
+                                onClick={() => moveToFront(selectedElementId)}
+                                className="flex items-center justify-center gap-1 p-1.5 text-[10px] bg-white border rounded hover:bg-blue-50 hover:border-blue-300 transition"
+                                title="للأمام تماماً"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                                </svg>
+                                للأمام
+                            </button>
+                            <button
+                                onClick={() => moveToBack(selectedElementId)}
+                                className="flex items-center justify-center gap-1 p-1.5 text-[10px] bg-white border rounded hover:bg-blue-50 hover:border-blue-300 transition"
+                                title="للخلف تماماً"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 13l-5 5m0 0l-5-5m5 5V6" />
+                                </svg>
+                                للخلف
+                            </button>
+                            <button
+                                onClick={() => duplicateElement(selectedElementId)}
+                                className="flex items-center justify-center gap-1 p-1.5 text-[10px] bg-white border rounded hover:bg-green-50 hover:border-green-300 transition"
+                                title="نسخ (Ctrl+D)"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                نسخ
+                            </button>
+                            <button
+                                onClick={() => deleteElement(selectedElementId)}
+                                className="flex items-center justify-center gap-1 p-1.5 text-[10px] bg-white border border-red-200 text-red-600 rounded hover:bg-red-50 transition"
+                                title="حذف (Delete)"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                                حذف
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Editing Area */}
             <div className="flex-1 bg-gray-800 p-8 flex items-center justify-center overflow-auto relative">
                 {/* Canvas Container */}
@@ -697,7 +961,7 @@ const CanvasEditor: React.FC<CanvasEditorProps> = ({
                     ))}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

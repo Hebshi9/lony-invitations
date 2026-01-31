@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Users, Send, CheckCircle, Scan, RefreshCw, Download, MessageCircle } from 'lucide-react';
+import { Users, Send, CheckCircle, Scan, RefreshCw, Download, MessageCircle, Lock } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
+import { hasFeature, EventFeatures } from '../lib/features';
 
 const AnalyticsDashboard: React.FC = () => {
     const [stats, setStats] = useState({
@@ -15,19 +16,27 @@ const AnalyticsDashboard: React.FC = () => {
     });
     const [events, setEvents] = useState<any[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<string>('');
+    const [selectedEvent, setSelectedEvent] = useState<any>(null);
     const [loading, setLoading] = useState(false);
 
     // Fetch Events 
     useEffect(() => {
         const loadEvents = async () => {
-            const { data } = await supabase.from('events').select('id, name').order('created_at', { ascending: false });
+            const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false });
             if (data && data.length > 0) {
                 setEvents(data);
                 setSelectedEventId(data[0].id);
+                setSelectedEvent(data[0]);
             }
         };
         loadEvents();
     }, []);
+
+    // Update selected event when ID changes
+    useEffect(() => {
+        const event = events.find(e => e.id === selectedEventId);
+        if (event) setSelectedEvent(event);
+    }, [selectedEventId, events]);
 
     // Fetch Stats when event changes
     useEffect(() => {
@@ -217,7 +226,7 @@ const AnalyticsDashboard: React.FC = () => {
                 'تم توليد الكرت': g.card_generated ? 'نعم' : 'لا',
                 'رقم الكرت': g.card_number,
                 'تاريخ التوليد': g.card_generated_at ? new Date(g.card_generated_at).toLocaleDateString('ar-SA') : '-',
-                'رابط الدعوة': `https://lony-invites.com/invite/${g.qr_token}`
+                'رابط الدعوة': `https://lonyinvite.netlify.app/check-in.html?token=${g.qr_token}`
             }));
 
             // Generate Sheet
@@ -246,6 +255,28 @@ const AnalyticsDashboard: React.FC = () => {
         { name: 'الكروت', value: stats.totalInvited },
         { name: 'الحضور (Scan)', value: stats.scanned }
     ];
+
+    // Check if live analytics feature is enabled
+    if (selectedEvent && !hasFeature(selectedEvent, 'live_analytics')) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">
+                <Card className="max-w-md">
+                    <CardContent className="p-8 text-center">
+                        <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">التحليلات المباشرة غير مفعلة</h2>
+                        <p className="text-gray-600 mb-6">
+                            ميزة التحليلات المباشرة غير متاحة لهذا الحدث. يرجى تفعيلها من إعدادات الحدث.
+                        </p>
+                        <div className="bg-blue-50 rounded-lg p-4 text-right">
+                            <p className="text-sm text-blue-800">
+                                💡 يمكنك تفعيل هذه الميزة من صفحة تعديل الحدث
+                            </p>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
 
     return (
         <div className="p-6 space-y-6 max-w-7xl mx-auto font-kufi" dir="rtl">

@@ -27,6 +27,8 @@ const EventSummary: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [copied, setCopied] = useState<string | null>(null);
     const [guestsCount, setGuestsCount] = useState(0);
+    const [demoGuests, setDemoGuests] = useState<any[]>([]);
+    const [currentDemoIndex, setCurrentDemoIndex] = useState(0);
 
     useEffect(() => {
         loadEvent();
@@ -50,6 +52,16 @@ const EventSummary: React.FC = () => {
                 .eq('event_id', eventId);
 
             setGuestsCount(count || 0);
+
+            // Get demo guests
+            const { data: demos } = await supabase
+                .from('guests')
+                .select('*')
+                .eq('event_id', eventId)
+                .eq('is_demo', true)
+                .order('demo_state');
+
+            setDemoGuests(demos || []);
         } catch (err) {
             console.error(err);
         } finally {
@@ -318,7 +330,136 @@ const EventSummary: React.FC = () => {
                     </Card>
                 )}
 
-                {/* Client Preview Samples - عينات للعميل */}
+                {/* Demo Cards Carousel - عينات تلقائية */}
+                {demoGuests.length > 0 && (
+                    <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 overflow-hidden">
+                        <CardHeader className="bg-gradient-to-r from-indigo-600 to-blue-600 text-white">
+                            <CardTitle className="text-xl flex items-center gap-2">
+                                <QrCode className="w-6 h-6" />
+                                عينات البطاقات للعميل
+                            </CardTitle>
+                            <p className="text-sm text-indigo-100 mt-2">
+                                3 عينات تلقائية توضح شكل البطاقات في جميع المراحل
+                            </p>
+                        </CardHeader>
+                        <CardContent className="p-6">
+                            {/* Carousel */}
+                            <div className="relative">
+                                {/* Current Card Display */}
+                                <div className="bg-white rounded-xl p-6 shadow-lg min-h-[300px] flex flex-col items-center justify-center">
+                                    {demoGuests[currentDemoIndex] ? (
+                                        <div className="text-center space-y-4">
+                                            {/* Demo State Badge */}
+                                            <div className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-full font-bold text-lg">
+                                                {currentDemoIndex === 0 && '1️⃣ قبل المناسبة'}
+                                                {currentDemoIndex === 1 && '2️⃣ أثناء المناسبة'}
+                                                {currentDemoIndex === 2 && '3️⃣ بعد المناسبة'}
+                                            </div>
+
+                                            {/* Card Preview Placeholder */}
+                                            <div className="bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl p-8 w-full max-w-md mx-auto border-4 border-dashed border-gray-300">
+                                                <div className="aspect-[3/4] flex items-center justify-center">
+                                                    <div className="text-center space-y-3">
+                                                        <div className="text-6xl mb-4">
+                                                            {currentDemoIndex === 0 && '📅'}
+                                                            {currentDemoIndex === 1 && '🎉'}
+                                                            {currentDemoIndex === 2 && '✅'}
+                                                        </div>
+                                                        <h3 className="text-xl font-bold text-gray-800">
+                                                            {demoGuests[currentDemoIndex].name}
+                                                        </h3>
+                                                        <p className="text-sm text-gray-600">
+                                                            الطاولة: {demoGuests[currentDemoIndex].table_no}
+                                                        </p>
+                                                        <p className="text-sm text-gray-600">
+                                                            مرافقين: {demoGuests[currentDemoIndex].companions_count}
+                                                        </p>
+                                                        <div className="mt-4 pt-4 border-t border-gray-300">
+                                                            <p className="text-xs text-gray-500">
+                                                                💡 البطاقة الفعلية ستحتوي على التصميم الخاص بك
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Scenario Description */}
+                                            <div className="bg-blue-50 rounded-lg p-4 text-right">
+                                                <h4 className="font-bold text-blue-900 mb-2">
+                                                    {currentDemoIndex === 0 && '📖 السيناريو:'}
+                                                    {currentDemoIndex === 1 && '📖 السيناريو:'}
+                                                    {currentDemoIndex === 2 && '📖 السيناريو:'}
+                                                </h4>
+                                                <p className="text-sm text-blue-800">
+                                                    {currentDemoIndex === 0 && hasFeature(event, 'enable_simple_scan') &&
+                                                        'الضيف يقدر يمسح QR ويشوف بطاقته ومعلومات المناسبة (معاينة فقط - لا تسجيل)'}
+                                                    {currentDemoIndex === 0 && !hasFeature(event, 'enable_simple_scan') &&
+                                                        'الضيف لا يقدر يفتح البطاقة - يظهر له رسالة "انتظر يوم المناسبة"'}
+                                                    {currentDemoIndex === 1 && hasFeature(event, 'require_inspector_app') &&
+                                                        'المشرف يمسح QR ويسجل الحضور رسمياً - الضيف إذا فتحها يشوف معاينة فقط'}
+                                                    {currentDemoIndex === 1 && !hasFeature(event, 'require_inspector_app') &&
+                                                        'الضيف يقدر يسجل حضوره بنفسه عن طريق مسح QR'}
+                                                    {currentDemoIndex === 2 && hasFeature(event, 'client_dashboard') &&
+                                                        'العميل يشوف إحصائيات كاملة + الضيف يقدر يشوف بطاقته كذكرى'}
+                                                    {currentDemoIndex === 2 && !hasFeature(event, 'client_dashboard') &&
+                                                        'العميل يستلم تقرير نهائي بالإيميل - الضيف يحتفظ بالبطاقة كذكرى'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center text-gray-500">
+                                            <p>لا توجد عينات متاحة</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Carousel Navigation */}
+                                <div className="flex items-center justify-center gap-4 mt-6">
+                                    <Button
+                                        onClick={() => setCurrentDemoIndex(Math.max(0, currentDemoIndex - 1))}
+                                        disabled={currentDemoIndex === 0}
+                                        variant="outline"
+                                        className="px-6"
+                                    >
+                                        السابق
+                                    </Button>
+
+                                    {/* Dots Navigation */}
+                                    <div className="flex gap-2">
+                                        {demoGuests.map((_, index) => (
+                                            <button
+                                                key={index}
+                                                onClick={() => setCurrentDemoIndex(index)}
+                                                className={`w-3 h-3 rounded-full transition-all ${index === currentDemoIndex
+                                                        ? 'bg-indigo-600 w-8'
+                                                        : 'bg-gray-300 hover:bg-gray-400'
+                                                    }`}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    <Button
+                                        onClick={() => setCurrentDemoIndex(Math.min(demoGuests.length - 1, currentDemoIndex + 1))}
+                                        disabled={currentDemoIndex === demoGuests.length - 1}
+                                        variant="outline"
+                                        className="px-6"
+                                    >
+                                        التالي
+                                    </Button>
+                                </div>
+
+                                {/* Info */}
+                                <div className="mt-4 bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+                                    <p className="text-sm text-yellow-800 text-center">
+                                        💡 <strong>ملاحظة:</strong> هذه عينات تلقائية للعرض على العميل - لا تؤثر على الدعوات الحقيقية
+                                    </p>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Client Preview Samples - نصوص توضيحية */}
                 <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50">
                     <CardHeader className="bg-gradient-to-r from-purple-600 to-pink-600 text-white">
                         <CardTitle className="text-xl flex items-center gap-2">

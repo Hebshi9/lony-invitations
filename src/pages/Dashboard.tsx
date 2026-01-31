@@ -121,6 +121,47 @@ const Dashboard: React.FC = () => {
 
             {activeTab === 'overview' && (
                 <>
+                    {/* Quick Actions */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 hover:shadow-lg transition-shadow">
+                            <CardContent className="p-6">
+                                <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                        <h3 className="text-xl font-bold text-blue-900 mb-2">📊 رفع الضيوف بالذكاء الاصطناعي</h3>
+                                        <p className="text-sm text-blue-700 mb-4">
+                                            تحليل تلقائي للأعمدة + Confidence Score
+                                        </p>
+                                        <Button
+                                            onClick={() => window.location.href = '/upload-guests-new'}
+                                            className="bg-blue-600 hover:bg-blue-700"
+                                        >
+                                            🤖 رفع Excel ذكي
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50 hover:shadow-lg transition-shadow">
+                            <CardContent className="p-6">
+                                <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                        <h3 className="text-xl font-bold text-purple-900 mb-2">🎨 الاستوديو المحسّن</h3>
+                                        <p className="text-sm text-purple-700 mb-4">
+                                            معاينة فورية + QR حقيقي + تنقل سهل
+                                        </p>
+                                        <Button
+                                            onClick={() => window.location.href = '/studio-new'}
+                                            className="bg-purple-600 hover:bg-purple-700"
+                                        >
+                                            ✨ فتح الاستوديو
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <Card>
                             <CardHeader>

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>دعوة خاصة - Lony Invitations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #c5a365;
+            --primary-dark: #8c7343;
+            --success: #059669;
+            --error: #dc2626;
+            --warning: #d97706;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --bg-color: #FDFBF7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: var(--bg-color);
+            background-image: none;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: var(--text-dark);
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            max-width: 480px;
+            width: 100%;
+            overflow: hidden;
+            position: relative;
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .header-bg {
+            height: 160px;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .header-logo {
+            max-height: 120px;
+            max-width: 80%;
+            object-fit: contain;
+        }
+
+        .status-icon-wrapper {
+            width: 90px;
+            height: 90px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            position: absolute;
+            bottom: -45px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
+
+        .content {
+            padding: 60px 30px 40px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-dark);
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: var(--text-light);
+            margin-bottom: 24px;
+        }
+
+        .guest-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 24px;
+            text-align: right;
+        }
+
+        .guest-name {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 16px;
+            text-align: center;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 12px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .label {
+            color: var(--text-light);
+            font-size: 14px;
+        }
+
+        .value {
+            font-weight: 600;
+            color: var(--text-dark);
+            font-size: 16px;
+        }
+
+        .timer-box {
+            background: var(--warning);
+            color: white;
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+
+        .timer-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .timer-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px;
+            border-radius: 8px;
+        }
+
+        .timer-val {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .timer-label {
+            font-size: 10px;
+            opacity: 0.9;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e5e7eb;
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .history-section {
+            margin-top: 30px;
+            border-top: 1px dashed #e2e8f0;
+            padding-top: 20px;
+        }
+
+        .history-title {
+            font-size: 14px;
+            color: var(--text-light);
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .scan-pill {
+            display: inline-flex;
+            align-items: center;
+            background: #eff6ff;
+            color: var(--primary-dark);
+            padding: 6px 12px;
+            border-radius: 100px;
+            font-size: 13px;
+            font-weight: 600;
+            margin: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container" id="app">
+        <div class="content" style="padding-top: 40px;">
+            <div class="spinner"></div>
+            <h3>جاري التحقق من الدعوة...</h3>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://gxunxhzjqclddoobxvpz.supabase.co/rest/v1';
+        const API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzAzNDMsImV4cCI6MjA4MDEwNjM0M30.OoOj_c7cqbsO_lzFKSM6hhPAg2F_F5gpRwBgDh74TXg';
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const qrToken = urlParams.get('token');
+
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_URL}${endpoint}`, {
+                    ...options,
+                    headers: {
+                        'apikey': API_KEY,
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=representation',
+                        ...options.headers
+                    }
+                });
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                return response.json();
+            } catch (error) {
+                console.error(error);
+                throw error;
+            }
+        }
+
+        async function init() {
+            // ─── TEST MODE HANDLING ───
+            const testMode = urlParams.get('_test_mode');
+            if (testMode) {
+                const mockGuest = { name: 'عبدالله محمد', table_no: '5', companions_count: 2 };
+                const mockEvent = { name: 'حفل زفاف ساره وخالد', qr_active_from: new Date(Date.now() + 86400000).toISOString() };
+
+                if (testMode === 'countdown') {
+                    showCountdown(mockGuest, mockEvent, new Date(Date.now() + 86400000));
+                    return;
+                }
+                if (testMode === 'expired') {
+                    showExpired(mockGuest, mockEvent);
+                    return;
+                }
+                if (testMode === 'success') {
+                    showSuccess(mockGuest, mockEvent, [{ scanned_at: new Date().toISOString() }]);
+                    return;
+                }
+            }
+
+            if (!qrToken) return showError('رابط غير صالح', 'لم يتم العثور على رمز الدعوة');
+
+            try {
+                const guests = await apiCall(`/guests?qr_token=eq.${qrToken}&select=*,events(*)`);
+                if (!guests || guests.length === 0) return showError('دعوة غير صالحة', 'عذراً، لم نتمكن من العثور على هذه الدعوة');
+
+                const guest = guests[0];
+                const event = guest.events;
+
+                // ─── CHECK ACTIVATION WINDOW ───
+                // Use backend setting or default to 1:00 PM on event date
+                let activeFrom, activeUntil;
+
+                if (event.qr_activation_enabled && event.qr_active_from) {
+                    activeFrom = new Date(event.qr_active_from);
+                    activeUntil = new Date(event.qr_active_until);
+                } else if (event.date) {
+                    // Default: Opens at 1:00 PM on event day
+                    activeFrom = new Date(event.date);
+                    activeFrom.setHours(13, 0, 0, 0); // 13:00 = 1:00 PM
+
+                    // Default: Closes 24 hours later
+                    activeUntil = new Date(activeFrom);
+                    activeUntil.setHours(activeFrom.getHours() + 24);
+                }
+
+                if (activeFrom && activeUntil) {
+                    const now = new Date();
+                    if (now < activeFrom) {
+                        return showCountdown(guest, event, activeFrom);
+                    }
+                    if (now > activeUntil) {
+                        return showExpired(guest, event);
+                    }
+                }
+
+                // ─── PROCEED TO CHECK-IN ───
+                const scans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
+                const totalAllowed = 1 + (guest.companions_count || 0);
+                const totalScanned = scans.length;
+                const remaining = totalAllowed - totalScanned;
+
+                if (remaining > 0) {
+                    await performCheckIn(guest.id, event.id);
+                    const newScans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
+                    showSuccess(guest, event, newScans);
+                } else {
+                    showAlreadyScanned(guest, event, scans);
+                }
+
+            } catch (error) {
+                showError('خطأ غير متوقع', 'حدث خطأ أثناء معالجة الطلب');
+            }
+        }
+
+        async function performCheckIn(guestId, eventId) {
+            await apiCall('/scans', {
+                method: 'POST',
+                body: JSON.stringify({
+                    guest_id: guestId,
+                    event_id: eventId,
+                    scanned_at: new Date().toISOString()
+                })
+            });
+        }
+
+        // ─── UI FUNCTIONS ───
+
+        function renderLayout(icon, title, subtitle, content) {
+            document.getElementById('app').innerHTML = `
+                <div class="header-bg">
+                    <img src="logo.jpg" alt="Logo" class="header-logo" onerror="this.style.display='none'">
+                    <div class="status-icon-wrapper">${icon}</div>
+                </div>
+                <div class="content">
+                    <h1>${title}</h1>
+                    <p class="subtitle">${subtitle}</p>
+                    ${content}
+                </div>
+            `;
+        }
+
+        function showCountdown(guest, event, targetDate) {
+            setInterval(() => {
+                const now = new Date().getTime();
+                const distance = targetDate.getTime() - now;
+
+                if (distance < 0) { location.reload(); return; }
+
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                document.getElementById('timer').innerHTML = `
+                    <div class="timer-item"><span class="timer-val">${seconds}</span><span class="timer-label">ثانية</span></div>
+                    <div class="timer-item"><span class="timer-val">${minutes}</span><span class="timer-label">دقيقة</span></div>
+                    <div class="timer-item"><span class="timer-val">${hours}</span><span class="timer-label">ساعة</span></div>
+                    <div class="timer-item"><span class="timer-val">${days}</span><span class="timer-label">يوم</span></div>
+                `;
+            }, 1000);
+
+            renderLayout(
+                '⏳',
+                'عذراً، الحفل لم يبدأ بعد',
+                `سيتم فتح بوابة الدخول للدعوة الخاصة بـ <strong>${guest.name}</strong> خلال:`,
+                `<div class="timer-box"><div class="timer-grid" id="timer"></div></div>
+                 <div class="guest-card">
+                    <div class="info-row"><span class="label">المناسبة</span><span class="value">${event.name}</span></div>
+                    <div class="info-row"><span class="label">موعد الفتح</span><span class="value">${targetDate.toLocaleString('ar-SA')}</span></div>
+                 </div>`
+            );
+        }
+
+        function showExpired(guest, event) {
+            renderLayout(
+                '🔒',
+                'انتهت صلاحية الدعوة',
+                'عذراً، لقد انتهى الوقت المحدد للدخول بهذه الدعوة',
+                `<div class="guest-card">
+                    <div class="guest-name">${guest.name}</div>
+                    <div class="info-row"><span class="label">الحدث</span><span class="value">${event.name}</span></div>
+                    <div class="info-row"><span class="label">الحالة</span><span class="value" style="color:var(--error)">منتهية الصلاحية</span></div>
+                 </div>`
+            );
+        }
+
+        function showSuccess(guest, event, scans) {
+            const total = 1 + (guest.companions_count || 0);
+            const used = scans.length;
+            const left = total - used;
+
+            renderLayout(
+                '<span style="color:var(--success)">✓</span>',
+                'تم تسجيل الدخول بنجاح',
+                'أهلاً بك، نتمنى لك وقتاً ممتعاً!',
+                `<div class="guest-card">
+                    <div class="guest-name">${guest.name}</div>
+                    <div class="info-row"><span class="label">الحدث</span><span class="value">${event.name}</span></div>
+                    ${guest.table_no ? `<div class="info-row"><span class="label">الطاولة</span><span class="value">${guest.table_no}</span></div>` : ''}
+                    <div class="info-row"><span class="label">المرافقين</span><span class="value">${used} / ${total}</span></div>
+                    <div class="info-row"><span class="label">المتبقي</span><span class="value" style="color:${left > 0 ? 'var(--success)' : 'var(--error)'}">${left}</span></div>
+                 </div>
+                 <div class="history-section">
+                    <div class="history-title">سجل الدخول</div>
+                    ${scans.map(s => `<span class="scan-pill">🕒 ${new Date(s.scanned_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</span>`).join('')}
+                 </div>`
+            );
+        }
+
+        function showAlreadyScanned(guest, event, scans) {
+            renderLayout(
+                '<span style="color:var(--error)">✕</span>',
+                'تم استخدام الدعوة مسبقاً',
+                'عذراً، تم استهلاك جميع مرات الدخول المتاحة',
+                `<div class="guest-card">
+                    <div class="guest-name">${guest.name}</div>
+                    <div class="info-row"><span class="label">مرات الدخول</span><span class="value">${scans.length}</span></div>
+                    <div class="info-row"><span class="label">آخر دخول</span><span class="value">${new Date(scans[0].scanned_at).toLocaleString('ar-SA')}</span></div>
+                 </div>`
+            );
+        }
+
+        function showError(title, msg) {
+            document.getElementById('app').innerHTML = `
+                <div class="content" style="text-align:center; padding-top:40px">
+                    <div style="font-size:60px; margin-bottom:20px">⚠️</div>
+                    <h1 style="color:var(--error)">${title}</h1>
+                    <p style="color:var(--text-light)">${msg}</p>
+                </div>`;
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+test-results/
+playwright-report/
+
+# Production
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WhatsApp Session Data (CRITICAL: DO NOT COMMIT)
+.wwebjs_auth/
+.wwebjs_cache/
+auth_sessions/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Netlify
+.netlify/

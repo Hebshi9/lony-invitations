@@ -1,0 +1,535 @@
+// Queue Manager - Smart message distribution across multiple accounts
+import { createClient } from '@supabase/supabase-js';
+import whatsappService from './baileys-service.js';
+
+const supabase = createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.VITE_SUPABASE_ANON_KEY
+);
+
+class QueueManager {
+    constructor() {
+        this.isRunning = false;
+        this.isPaused = false;
+        this.currentEventId = null;
+
+        // 🛡️ Anti-Ban Configuration
+        this.config = {
+            mode: 'balanced', // 'safe', 'balanced', or 'aggressive'
+
+            delays: {
+                betweenMessages: {
+                    min: 10000,   // 10 seconds
+                    max: 20000,   // 20 seconds
+                },
+                betweenBatches: {
+                    min: 15 * 60 * 1000,  // 15 minutes
+                    max: 25 * 60 * 1000,  // 25 minutes
+                },
+                randomBreaks: {
+                    probability: 0.15, // 15% chance of random break
+                    min: 2 * 60 * 1000,  // 2 minutes
+                    max: 5 * 60 * 1000   // 5 minutes
+                }
+            },
+
+            limits: {
+                messagesPerBatch: 15,
+                messagesPerHour: 25,
+                messagesPerDay: 170,
+                maxBurstSize: 10,
+                cooldownAfterBurst: 10 * 60 * 1000 // 10 minutes
+            },
+
+            humanBehavior: {
+                avoidHours: [0, 1, 2, 3, 4, 5], // Midnight to dawn
+                preferredHours: [9, 10, 11, 14, 15, 16, 19, 20, 21],
+                slowHours: [12, 13, 22, 23] // Lunch and late night
+            }
+        };
+
+        // Rate limiting state
+        this.rateLimiter = {
+            hourlyCount: 0,
+            burstCount: 0,
+            lastResetHour: new Date().getHours(),
+            consecutiveFailures: 0
+        };
+    }
+
+    /**
+     * Start sending messages for an event
+     */
+    async startSending(eventId) {
+        if (this.isRunning) {
+            throw new Error('Queue is already running');
+        }
+
+        this.isRunning = true;
+        this.isPaused = false;
+        this.currentEventId = eventId;
+
+        console.log(`Starting queue for event ${eventId}`);
+        // Do not await processQueue, let it run in background
+        this.processQueue().catch(err => {
+            console.error('Queue processing ended with error:', err);
+            this.stop();
+        });
+    }
+
+    /**
+     * Process the message queue
+     */
+    async processQueue() {
+        console.log('🚀 Queue processing started loop...');
+        console.log(`📍 Current Event ID: ${this.currentEventId}`);
+
+        while (this.isRunning && !this.isPaused) {
+            try {
+                console.log('\n--- Starting new batch cycle ---');
+
+                // Reset daily counts if needed
+                await this.resetDailyCounts();
+
+                // Get available accounts
+                const availableAccounts = await this.getAvailableAccounts();
+                console.log(`📊 Found ${availableAccounts.length} available accounts`);
+                availableAccounts.forEach(acc => {
+                    console.log(`  - ${acc.name} (${acc.phone}): ${acc.messages_sent_today}/${acc.daily_limit} messages`);
+                });
+
+                if (availableAccounts.length === 0) {
+                    console.log('⚠️ No available accounts. Pausing queue.');
+                    this.pause();
+                    break;
+                }
+
+                // Get pending messages
+                const pendingMessages = await this.getPendingMessages();
+                console.log(`📩 Found ${pendingMessages.length} pending messages for event ${this.currentEventId}`);
+
+                if (pendingMessages.length > 0) {
+                    console.log('First 3 messages:');
+                    pendingMessages.slice(0, 3).forEach((msg, i) => {
+                        console.log(`  ${i + 1}. ${msg.phone}: ${msg.message_text.substring(0, 30)}...`);
+                    });
+                }
+
+                if (pendingMessages.length === 0) {
+                    console.log('✅ No more pending messages. Queue complete.');
+                    this.stop();
+                    break;
+                }
+
+                // Distribute messages across available accounts
+                console.log('📤 Distributing messages...');
+                await this.distributeMessages(pendingMessages, availableAccounts);
+
+                // Wait before next batch
+                if (this.isRunning && !this.isPaused) {
+                    const batchDelay = this.getSmartDelay('batch');
+                    console.log(`⏳ Waiting ${(batchDelay / 1000 / 60).toFixed(1)} minutes before next batch...`);
+                    await this.sleep(batchDelay);
+                }
+            } catch (error) {
+                console.error('🔥 CRITICAL ERROR in Queue Loop:', error);
+                console.error('Stack:', error.stack);
+                this.stop();
+                break;
+            }
+        }
+        console.log('🛑 Queue processing loop ended.');
+    }
+
+    /**
+     * Distribute messages across multiple accounts
+     */
+    async distributeMessages(messages, accounts) {
+        const messagesPerAccount = Math.ceil(messages.length / accounts.length);
+
+        for (let i = 0; i < accounts.length; i++) {
+            const account = accounts[i];
+            const accountMessages = messages.slice(
+                i * messagesPerAccount,
+                (i + 1) * messagesPerAccount
+            );
+
+            // Send messages for this account
+            for (const message of accountMessages) {
+                if (!this.isRunning || this.isPaused) break;
+
+                // Check if we can send now (rate limiting)
+                const canSend = await this.canSendNow();
+                if (!canSend) {
+                    console.log('⏸️ Rate limit reached, pausing queue...');
+                    this.pause();
+                    break;
+                }
+
+                await this.sendMessage(account, message);
+
+                // Smart delay between messages
+                const delay = this.getSmartDelay('message');
+                console.log(`⏱️ Waiting ${(delay / 1000).toFixed(1)}s before next message...`);
+                await this.sleep(delay);
+            }
+        }
+    }
+
+    /**
+     * Send a single message
+     */
+    async sendMessage(account, message) {
+        try {
+            // Update status to 'queued'
+            await supabase
+                .from('whatsapp_messages')
+                .update({ status: 'queued' })
+                .eq('id', message.id);
+
+            // Add slight variation to message (anti-detection)
+            const variedMessage = this.addMessageVariation(message.message_text);
+
+            // Send via WhatsApp
+            await whatsappService.sendMessage(
+                account.id,
+                message.phone,
+                variedMessage,
+                message.image_url
+            );
+
+            // Update status to 'sent'
+            await supabase
+                .from('whatsapp_messages')
+                .update({
+                    status: 'sent',
+                    sent_at: new Date().toISOString(),
+                    sender_account: account.phone
+                })
+                .eq('id', message.id);
+
+            // Increment account message count
+            await supabase
+                .from('whatsapp_accounts')
+                .update({
+                    messages_sent_today: account.messages_sent_today + 1
+                })
+                .eq('id', account.id);
+
+            // Record successful send
+            this.recordMessageSent();
+
+            console.log(`✓ Sent message to ${message.phone} via ${account.phone}`);
+
+        } catch (error) {
+            console.error(`✗ Failed to send message to ${message.phone}:`, error);
+
+            // Check for ban warning signs
+            const warningStatus = this.checkWarningSign(error);
+            if (warningStatus === 'STOP') {
+                // Queue already stopped by checkWarningSign
+                return;
+            } else if (warningStatus === 'PAUSE') {
+                console.log('⚠️ Pausing due to warning signs...');
+                this.pause();
+            }
+
+            // Update status to 'failed'
+            await supabase
+                .from('whatsapp_messages')
+                .update({
+                    status: 'failed',
+                    error_message: error.message,
+                    retry_count: message.retry_count + 1
+                })
+                .eq('id', message.id);
+        }
+    }
+
+    /**
+     * Get available accounts (connected and under daily limit)
+     */
+    async getAvailableAccounts() {
+        const { data, error } = await supabase
+            .from('whatsapp_accounts')
+            .select('*')
+            .eq('status', 'connected');
+
+        if (error) {
+            console.error('Error fetching accounts:', error);
+            return [];
+        }
+
+        // Filter in JS to avoid Supabase column comparison issues
+        return (data || []).filter(account => {
+            const limit = account.daily_limit || 170;
+            const sent = account.messages_sent_today || 0;
+            return sent < limit;
+        });
+    }
+
+    /**
+     * Get pending messages for the current event
+     */
+    async getPendingMessages(limit = null) {
+        const batchSize = limit || this.config.limits.messagesPerBatch;
+
+        const { data, error } = await supabase
+            .from('whatsapp_messages')
+            .select('*')
+            .eq('event_id', this.currentEventId)
+            .eq('status', 'pending')
+            .limit(batchSize);
+
+        if (error) {
+            console.error('Error fetching messages:', error);
+            return [];
+        }
+
+        return data || [];
+    }
+
+    /**
+     * Reset daily counts for accounts
+     */
+    async resetDailyCounts() {
+        const { error } = await supabase.rpc('reset_daily_whatsapp_counts');
+
+        if (error) {
+            console.error('Error resetting daily counts:', error);
+        }
+    }
+
+    /**
+     * Pause the queue
+     */
+    pause() {
+        console.log('Queue paused');
+        this.isPaused = true;
+    }
+
+    /**
+     * Resume the queue
+     */
+    async resume() {
+        if (!this.isRunning) {
+            throw new Error('Queue is not running');
+        }
+
+        console.log('Queue resumed');
+        this.isPaused = false;
+        // Do not await processQueue
+        this.processQueue().catch(err => {
+            console.error('Queue processing (resume) ended with error:', err);
+            this.stop();
+        });
+    }
+
+    /**
+     * Stop the queue
+     */
+    stop() {
+        console.log('Queue stopped');
+        this.isRunning = false;
+        this.isPaused = false;
+        this.currentEventId = null;
+    }
+
+    /**
+     * Get queue status
+     */
+    async getStatus() {
+        if (!this.currentEventId) {
+            return {
+                isRunning: false,
+                isPaused: false,
+                eventId: null,
+                stats: null
+            };
+        }
+
+        // Get message statistics
+        const { data: stats } = await supabase
+            .from('whatsapp_messages')
+            .select('status')
+            .eq('event_id', this.currentEventId);
+
+        const statusCounts = {
+            pending: 0,
+            queued: 0,
+            sent: 0,
+            failed: 0
+        };
+
+        stats?.forEach(msg => {
+            statusCounts[msg.status] = (statusCounts[msg.status] || 0) + 1;
+        });
+
+        return {
+            isRunning: this.isRunning,
+            isPaused: this.isPaused,
+            eventId: this.currentEventId,
+            stats: statusCounts
+        };
+    }
+
+    /**
+     * Sleep utility
+     */
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // ============================================
+    // 🛡️ ANTI-BAN HELPER METHODS
+    // ============================================
+
+    /**
+     * Get smart delay with randomization and human-like breaks
+     */
+    getSmartDelay(type = 'message') {
+        const delayConfig = type === 'batch'
+            ? this.config.delays.betweenBatches
+            : this.config.delays.betweenMessages;
+
+        // Random delay within range
+        const baseDelay = Math.random() * (delayConfig.max - delayConfig.min) + delayConfig.min;
+
+        // Random break (simulates human behavior)
+        if (Math.random() < this.config.delays.randomBreaks.probability) {
+            const breakDuration = Math.random() *
+                (this.config.delays.randomBreaks.max - this.config.delays.randomBreaks.min) +
+                this.config.delays.randomBreaks.min;
+
+            console.log(`🧘 Taking a random break: ${(breakDuration / 1000 / 60).toFixed(1)} minutes`);
+            return baseDelay + breakDuration;
+        }
+
+        // Apply hour multiplier
+        const hourMultiplier = this.getHourMultiplier();
+        return baseDelay * hourMultiplier;
+    }
+
+    /**
+     * Check if we can send now (rate limiting)
+     */
+    async canSendNow() {
+        // Check time of day
+        if (!this.shouldSendAtThisHour()) {
+            console.log('😴 Avoiding sending at this hour');
+            return false;
+        }
+
+        // Reset hourly count if needed
+        const currentHour = new Date().getHours();
+        if (currentHour !== this.rateLimiter.lastResetHour) {
+            this.rateLimiter.hourlyCount = 0;
+            this.rateLimiter.lastResetHour = currentHour;
+        }
+
+        // Check hourly limit
+        if (this.rateLimiter.hourlyCount >= this.config.limits.messagesPerHour) {
+            console.log('⏸️ Hourly limit reached, waiting...');
+            return false;
+        }
+
+        // Check burst limit
+        if (this.rateLimiter.burstCount >= this.config.limits.maxBurstSize) {
+            console.log('🛑 Burst limit reached, cooling down...');
+            await this.sleep(this.config.limits.cooldownAfterBurst);
+            this.rateLimiter.burstCount = 0;
+        }
+
+        return true;
+    }
+
+    /**
+     * Record that a message was sent
+     */
+    recordMessageSent() {
+        this.rateLimiter.hourlyCount++;
+        this.rateLimiter.burstCount++;
+        this.rateLimiter.consecutiveFailures = 0; // Reset on success
+    }
+
+    /**
+     * Check if we should send at this hour
+     */
+    shouldSendAtThisHour() {
+        const hour = new Date().getHours();
+
+        // Avoid late night/early morning
+        if (this.config.humanBehavior.avoidHours.includes(hour)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get delay multiplier based on hour
+     */
+    getHourMultiplier() {
+        const hour = new Date().getHours();
+
+        if (this.config.humanBehavior.preferredHours.includes(hour)) {
+            return 1.0; // Normal speed
+        } else if (this.config.humanBehavior.slowHours.includes(hour)) {
+            return 1.5; // 50% slower
+        }
+
+        return 1.2; // Slightly slower
+    }
+
+    /**
+     * Check for warning signs of potential ban
+     */
+    checkWarningSign(error) {
+        const warningPatterns = [
+            'rate limit',
+            'too many requests',
+            'spam',
+            'blocked',
+            '429',
+            'flood'
+        ];
+
+        const errorMsg = error.message.toLowerCase();
+        const isWarning = warningPatterns.some(pattern =>
+            errorMsg.includes(pattern)
+        );
+
+        if (isWarning) {
+            this.rateLimiter.consecutiveFailures++;
+
+            console.warn(`⚠️ WARNING SIGN DETECTED: ${error.message}`);
+            console.warn(`Consecutive failures: ${this.rateLimiter.consecutiveFailures}`);
+
+            // Critical: Stop immediately if multiple failures
+            if (this.rateLimiter.consecutiveFailures >= 3) {
+                console.error('🚨 CRITICAL: Multiple failures detected! Stopping immediately.');
+                this.stop();
+                return 'STOP';
+            }
+
+            // Pause for extended period
+            return 'PAUSE';
+        }
+
+        return 'OK';
+    }
+
+    /**
+     * Add slight variation to message (anti-detection)
+     */
+    addMessageVariation(message) {
+        const variations = ['', ' ', '\n'];
+        const variation = variations[Math.floor(Math.random() * variations.length)];
+        return message + variation;
+    }
+}
+
+// Singleton instance
+const queueManager = new QueueManager();
+
+export default queueManager;

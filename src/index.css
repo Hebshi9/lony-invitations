@@ -1,0 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Noto+Kufi+Arabic:wght@100..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-lony-navy: #2F3645;
+  --color-lony-gold: #C5A059;
+  --color-lony-sand: #FDFBF7;
+  --color-lony-green: #68B984;
+  --color-lony-orange: #E68A5C;
+  --color-lony-cream: #FFF8E7;
+
+  --font-kufi: 'Noto Kufi Arabic', sans-serif;
+  --font-amiri: 'Amiri', serif;
+}
+
+:root {
+  font-family: 'Noto Kufi Arabic', sans-serif;
+}
+
+body {
+  @apply bg-lony-sand text-lony-navy;
+}

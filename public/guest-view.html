@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>دعوة - Lony Invitations</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&display=swap');
+
+        body {
+            font-family: 'Tajawal', sans-serif;
+        }
+
+        .font-amiri {
+            font-family: 'Amiri', serif;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .animate-delay-1 {
+            animation-delay: 0.1s;
+            animation-fill-mode: both;
+        }
+
+        .animate-delay-2 {
+            animation-delay: 0.2s;
+            animation-fill-mode: both;
+        }
+
+        .animate-delay-3 {
+            animation-delay: 0.3s;
+            animation-fill-mode: both;
+        }
+    </style>
+</head>
+
+<body class="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 min-h-screen">
+    <div id="app" class="py-8 px-4">
+        <div class="max-w-2xl mx-auto">
+            <!-- Loading State -->
+            <div id="loading" class="text-center">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                <p class="text-gray-600">جاري التحميل...</p>
+            </div>
+
+            <!-- Content (Hidden Initially) -->
+            <div id="content" class="hidden space-y-6"></div>
+
+            <!-- Error State -->
+            <div id="error" class="hidden text-center p-8">
+                <svg class="w-20 h-20 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <h1 class="text-3xl font-bold text-red-600 mb-2 font-amiri">دعوة غير صالحة</h1>
+                <p class="text-gray-600">عذراً، لم نتمكن من العثور على هذه الدعوة</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Supabase Configuration
+        const SUPABASE_URL = 'https://gxunxhzjqclddoobxvpz.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzAzNDMsImV4cCI6MjA4MDEwNjM0M30.OoOj_c7cqbsO_lzFKSM6hhPAg2F_F5gpRwBgDh74TXg';
+
+        // Initialize Supabase (will be replaced at runtime)
+        const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+        // Get QR token from URL
+        function getQRToken() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('token') || window.location.pathname.split('/').pop();
+        }
+
+        // Load guest data
+        async function loadGuest() {
+            const qrToken = getQRToken();
+
+            if (!supabaseClient) {
+                console.error('Supabase not initialized');
+                showError();
+                return;
+            }
+
+            try {
+                const { data: guest, error } = await supabaseClient
+                    .from('guests')
+                    .select('*, events(*)')
+                    .eq('qr_token', qrToken)
+                    .single();
+
+                document.getElementById('loading').classList.add('hidden');
+
+                if (error || !guest) {
+                    showError();
+                    return;
+                }
+
+                renderGuest(guest);
+            } catch (err) {
+                console.error('Error:', err);
+                document.getElementById('loading').classList.add('hidden');
+                showError();
+            }
+        }
+
+        // Show error state
+        function showError() {
+            document.getElementById('error').classList.remove('hidden');
+        }
+
+        // Handle RSVP
+        async function handleRSVP(guestId, status) {
+            try {
+                const { error } = await supabaseClient
+                    .from('guests')
+                    .update({
+                        rsvp_status: status,
+                        rsvp_received_at: new Date().toISOString()
+                    })
+                    .eq('id', guestId);
+
+                if (error) throw error;
+
+                alert('شكراً! تم تسجيل ردك بنجاح ✅');
+                location.reload();
+            } catch (err) {
+                console.error('Error:', err);
+                alert('حدث خطأ، الرجاء المحاولة مرة أخرى');
+            }
+        }
+
+        // Render guest information
+        function renderGuest(guest) {
+            const event = guest.events;
+
+            let html = '';
+
+            // Card Image
+            if (guest.card_image_url) {
+                html += `
+                    <div class="rounded-2xl overflow-hidden shadow-2xl animate-fade-in">
+                        <img src="${guest.card_image_url}" alt="بطاقة الدعوة" class="w-full">
+                    </div>
+                `;
+            }
+
+            // Guest Info Card
+            html += `
+                <div class="bg-white rounded-2xl shadow-xl p-8 animate-fade-in animate-delay-1">
+                    <div class="text-center mb-6">
+                        <div class="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg">
+                            <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                        </div>
+                        <h1 class="text-3xl font-bold text-gray-800 mb-2 font-amiri">${guest.name}</h1>
+                        <p class="text-gray-600">مدعو لحضور</p>
+                        <h2 class="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mt-2 font-amiri">
+                            ${event.name}
+                        </h2>
+                    </div>
+
+                    <div class="space-y-3">
+                        <!-- Date -->
+                        <div class="flex items-center gap-3 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+                            <svg class="w-6 h-6 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                            <div>
+                                <div class="text-sm text-gray-600">التاريخ</div>
+                                <div class="font-bold text-gray-800">${event.date}</div>
+                            </div>
+                        </div>
+
+                        ${event.location ? `
+                            <div class="flex items-center gap-3 p-4 bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl border border-purple-200">
+                                <svg class="w-6 h-6 text-purple-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
+                                <div>
+                                    <div class="text-sm text-gray-600">المكان</div>
+                                    <div class="font-bold text-gray-800">${event.location}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${guest.table_no ? `
+                            <div class="flex items-center gap-3 p-4 bg-gradient-to-r from-green-50 to-green-100 rounded-xl border border-green-200">
+                                <svg class="w-6 h-6 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                </svg>
+                                <div>
+                                    <div class="text-sm text-gray-600">رقم الطاولة</div>
+                                    <div class="font-bold text-gray-800 text-3xl font-amiri">${guest.table_no}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${guest.companions_count && guest.companions_count > 0 ? `
+                            <div class="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-xl border border-yellow-200">
+                                <svg class="w-6 h-6 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                </svg>
+                                <div>
+                                    <div class="text-sm text-gray-600">عدد المرافقين</div>
+                                    <div class="font-bold text-gray-800 text-3xl font-amiri">${guest.companions_count}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${guest.rsvp_status ? `
+                            <div class="flex items-center gap-3 p-4 rounded-xl border ${guest.rsvp_status === 'confirmed' ? 'bg-gradient-to-r from-green-50 to-green-100 border-green-200' :
+                        guest.rsvp_status === 'declined' ? 'bg-gradient-to-r from-red-50 to-red-100 border-red-200' :
+                            'bg-gradient-to-r from-yellow-50 to-yellow-100 border-yellow-200'
+                    }">
+                                <svg class="w-6 h-6 ${guest.rsvp_status === 'confirmed' ? 'text-green-600' :
+                        guest.rsvp_status === 'declined' ? 'text-red-600' :
+                            'text-yellow-600'
+                    } flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <div>
+                                    <div class="text-sm text-gray-600">حالة التأكيد</div>
+                                    <div class="font-bold text-gray-800">
+                                        ${guest.rsvp_status === 'confirmed' ? '✅ مؤكد الحضور' :
+                        guest.rsvp_status === 'declined' ? '❌ معتذر' :
+                            '🤔 ربما'}
+                                    </div>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+            // RSVP Buttons (if not already responded)
+            if (!guest.rsvp_status) {
+                html += `
+                    <div class="bg-white rounded-2xl shadow-xl p-8 animate-fade-in animate-delay-2">
+                        <h3 class="text-xl font-bold text-center mb-6 font-amiri">تأكيد الحضور</h3>
+                        <div class="grid grid-cols-3 gap-4">
+                            <button onclick="handleRSVP('${guest.id}', 'confirmed')" class="p-6 bg-gradient-to-br from-green-100 to-green-200 hover:from-green-200 hover:to-green-300 rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 border-2 border-green-300">
+                                <div class="text-4xl mb-2">✅</div>
+                                <div class="font-bold text-green-800">سأحضر</div>
+                            </button>
+                            <button onclick="handleRSVP('${guest.id}', 'maybe')" class="p-6 bg-gradient-to-br from-yellow-100 to-yellow-200 hover:from-yellow-200 hover:to-yellow-300 rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 border-2 border-yellow-300">
+                                <div class="text-4xl mb-2">🤔</div>
+                                <div class="font-bold text-yellow-800">ربما</div>
+                            </button>
+                            <button onclick="handleRSVP('${guest.id}', 'declined')" class="p-6 bg-gradient-to-br from-red-100 to-red-200 hover:from-red-200 hover:to-red-300 rounded-xl transition-all duration-300 hover:shadow-lg hover:scale-105 border-2 border-red-300">
+                                <div class="text-4xl mb-2">❌</div>
+                                <div class="font-bold text-red-800">معتذر</div>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // WiFi Card
+            if (event.wifi_ssid) {
+                html += `
+                    <div class="bg-white rounded-2xl shadow-xl p-8 animate-fade-in animate-delay-3">
+                        <div class="text-center">
+                            <svg class="w-12 h-12 text-blue-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                            </svg>
+                            <h3 class="text-xl font-bold text-gray-800 mb-4 font-amiri">شبكة WiFi</h3>
+                            <div class="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 mb-4 border-2 border-blue-200">
+                                <div class="text-sm text-gray-600 mb-1">اسم الشبكة</div>
+                                <div class="font-bold text-gray-800 text-xl font-mono mb-4">${event.wifi_ssid}</div>
+                                ${event.wifi_password ? `
+                                    <div class="text-sm text-gray-600 mb-1">كلمة المرور</div>
+                                    <div class="font-mono text-gray-800 text-lg bg-white px-4 py-2 rounded-lg border border-gray-300">${event.wifi_password}</div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Location Map
+            if (event.location_maps_url) {
+                html += `
+                    <div class="bg-white rounded-2xl shadow-xl p-8 animate-fade-in">
+                        <div class="text-center">
+                            <svg class="w-12 h-12 text-purple-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                            <h3 class="text-xl font-bold text-gray-800 mb-4 font-amiri">الموقع على الخريطة</h3>
+                            <a href="${event.location_maps_url}" target="_blank" rel="noopener noreferrer" class="inline-block px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-bold hover:shadow-2xl transition-all duration-300 hover:scale-105">
+                                📍 فتح في Google Maps
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Footer
+            html += `
+                <div class="text-center py-6 text-gray-500 text-sm">
+                    <p class="mb-2">نتشرف بحضوركم 🎉</p>
+                    <p class="text-xs">Powered by <span class="font-bold text-yellow-600">Lony Invitations</span></p>
+                </div>
+            `;
+
+            document.getElementById('content').innerHTML = html;
+            document.getElementById('content').classList.remove('hidden');
+        }
+
+        // Load guest data on page load
+        window.addEventListener('DOMContentLoaded', loadGuest);
+    </script>
+</body>
+
+</html>

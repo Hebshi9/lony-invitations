@@ -24,8 +24,7 @@ import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import EventSummary from './pages/EventSummary';
-import NewUploadGuests from './pages/NewUploadGuests';
-import ImprovedStudio from './pages/ImprovedStudio';
+import EventSummary from './pages/EventSummary';
 import Login from './pages/Login';
 import { Loader2 } from 'lucide-react';
 
@@ -82,9 +81,7 @@ const AppContent: React.FC = () => {
                 <Route path="/orders/:id" element={<OrderDetails />} />
                 <Route path="/event" element={<EventManager />} />
                 <Route path="/upload-guests" element={<UploadGuests />} />
-                <Route path="/upload-guests-new" element={<NewUploadGuests />} />
                 <Route path="/studio" element={<UnifiedInvitationStudio />} />
-                <Route path="/studio-new" element={<ImprovedStudio />} />
                 <Route path="/whatsapp" element={<WhatsAppHub />} />
                 <Route path="/whatsapp-sender" element={<WhatsAppSender />} />
                 <Route path="/quick-upload" element={<QuickWhatsAppUpload />} />

@@ -119,131 +119,112 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
 
+            {/* Production Toolbar */}
+            <div className="flex flex-wrap gap-4 border-b pb-6">
+                <Button onClick={() => window.location.href = '/upload-guests'} className="bg-blue-600 hover:bg-blue-700">
+                    <FileInput className="w-4 h-4 ml-2" />
+                    رفع الضيوف (AI)
+                </Button>
+                <Button onClick={() => window.location.href = '/studio'} className="bg-purple-600 hover:bg-purple-700">
+                    <Palette className="w-4 h-4 ml-2" />
+                    استوديو البطاقات
+                </Button>
+                <Button onClick={() => window.location.href = '/whatsapp-sender'} className="bg-green-600 hover:bg-green-700">
+                    <ShoppingBag className="w-4 h-4 ml-2" />
+                    إرسال واتساب
+                </Button>
+                <Button onClick={() => window.location.href = '/analytics'} variant="outline">
+                    <LayoutDashboard className="w-4 h-4 ml-2" />
+                    التقارير
+                </Button>
+            </div>
+
             {activeTab === 'overview' && (
                 <>
-                    {/* Quick Actions */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 hover:shadow-lg transition-shadow">
-                            <CardContent className="p-6">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1">
-                                        <h3 className="text-xl font-bold text-blue-900 mb-2">📊 رفع الضيوف بالذكاء الاصطناعي</h3>
-                                        <p className="text-sm text-blue-700 mb-4">
-                                            تحليل تلقائي للأعمدة + Confidence Score
+                    {activeTab === 'overview' && (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-lg text-right">إجمالي الأحداث</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-3xl font-bold text-blue-600 text-right">
+                                            {loading ? '...' : stats.totalEvents}
                                         </p>
-                                        <Button
-                                            onClick={() => window.location.href = '/upload-guests-new'}
-                                            className="bg-blue-600 hover:bg-blue-700"
-                                        >
-                                            🤖 رفع Excel ذكي
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
+                                    </CardContent>
+                                </Card>
 
-                        <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50 hover:shadow-lg transition-shadow">
-                            <CardContent className="p-6">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1">
-                                        <h3 className="text-xl font-bold text-purple-900 mb-2">🎨 الاستوديو المحسّن</h3>
-                                        <p className="text-sm text-purple-700 mb-4">
-                                            معاينة فورية + QR حقيقي + تنقل سهل
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-lg text-right">إجمالي الضيوف</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-3xl font-bold text-green-600 text-right">
+                                            {loading ? '...' : stats.totalGuests}
                                         </p>
-                                        <Button
-                                            onClick={() => window.location.href = '/studio-new'}
-                                            className="bg-purple-600 hover:bg-purple-700"
-                                        >
-                                            ✨ فتح الاستوديو
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
+                                    </CardContent>
+                                </Card>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">إجمالي الأحداث</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-blue-600 text-right">
-                                    {loading ? '...' : stats.totalEvents}
-                                </p>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">إجمالي الضيوف</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-green-600 text-right">
-                                    {loading ? '...' : stats.totalGuests}
-                                </p>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">الدعوات المرسلة</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-purple-600 text-right">
-                                    {loading ? '...' : stats.sentInvitations}
-                                </p>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-right">الأحداث الأخيرة</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-right">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الحدث</th>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {loading ? (
-                                            <tr>
-                                                <td colSpan={3} className="px-6 py-4 text-center text-gray-500">جاري التحميل...</td>
-                                            </tr>
-                                        ) : recentEvents.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={3} className="px-6 py-4 text-center text-gray-500">لا توجد أحداث حتى الآن</td>
-                                            </tr>
-                                        ) : (
-                                            recentEvents.map((event) => (
-                                                <tr key={event.id}>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.name}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                        <Button size="sm" variant="outline">عرض التفاصيل</Button>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-lg text-right">الدعوات المرسلة</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <p className="text-3xl font-bold text-purple-600 text-right">
+                                            {loading ? '...' : stats.sentInvitations}
+                                        </p>
+                                    </CardContent>
+                                </Card>
                             </div>
-                        </CardContent>
-                    </Card>
-                </>
-            )}
 
-            {activeTab === 'intake' && <IntakeRequestList />}
-            {activeTab === 'orders' && <OrderList />}
-            {/* {activeTab === 'templates' && <CardTemplateEditor />} */}
-        </div>
-    );
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-right">الأحداث الأخيرة</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-right">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الحدث</th>
+                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
+                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                {loading ? (
+                                                    <tr>
+                                                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500">جاري التحميل...</td>
+                                                    </tr>
+                                                ) : recentEvents.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500">لا توجد أحداث حتى الآن</td>
+                                                    </tr>
+                                                ) : (
+                                                    recentEvents.map((event) => (
+                                                        <tr key={event.id}>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.name}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                                <Button size="sm" variant="outline">عرض التفاصيل</Button>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </>
+                    )}
+
+                    {activeTab === 'intake' && <IntakeRequestList />}
+                    {activeTab === 'orders' && <OrderList />}
+                    {/* {activeTab === 'templates' && <CardTemplateEditor />} */}
+                </div>
+            );
 };
 
-export default Dashboard;
+            export default Dashboard;

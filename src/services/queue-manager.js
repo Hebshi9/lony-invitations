@@ -16,37 +16,62 @@ class QueueManager {
         // 🛡️ Anti-Ban Configuration
         this.config = {
             mode: 'balanced', // 'safe', 'balanced', or 'aggressive'
+        };
 
-            delays: {
-                betweenMessages: {
-                    min: 10000,   // 10 seconds
-                    max: 20000,   // 20 seconds
+        // Define settings for each mode
+        this.modes = {
+            safe: {
+                delays: {
+                    betweenMessages: { min: 20000, max: 40000 },
+                    betweenBatches: { min: 20 * 60 * 1000, max: 30 * 60 * 1000 },
+                    randomBreaks: { probability: 0.20, min: 5 * 60 * 1000, max: 10 * 60 * 1000 }
                 },
-                betweenBatches: {
-                    min: 15 * 60 * 1000,  // 15 minutes
-                    max: 25 * 60 * 1000,  // 25 minutes
-                },
-                randomBreaks: {
-                    probability: 0.15, // 15% chance of random break
-                    min: 2 * 60 * 1000,  // 2 minutes
-                    max: 5 * 60 * 1000   // 5 minutes
+                limits: {
+                    messagesPerBatch: 10,
+                    messagesPerHour: 20,
+                    messagesPerDay: 150,
+                    maxBurstSize: 5,
+                    cooldownAfterBurst: 15 * 60 * 1000
                 }
             },
-
-            limits: {
-                messagesPerBatch: 15,
-                messagesPerHour: 25,
-                messagesPerDay: 170,
-                maxBurstSize: 10,
-                cooldownAfterBurst: 10 * 60 * 1000 // 10 minutes
+            balanced: { // Default - Good for ~300-400/day
+                delays: {
+                    betweenMessages: { min: 10000, max: 25000 },
+                    betweenBatches: { min: 10 * 60 * 1000, max: 20 * 60 * 1000 },
+                    randomBreaks: { probability: 0.15, min: 3 * 60 * 1000, max: 8 * 60 * 1000 }
+                },
+                limits: {
+                    messagesPerBatch: 20,
+                    messagesPerHour: 40,
+                    messagesPerDay: 400,
+                    maxBurstSize: 10,
+                    cooldownAfterBurst: 10 * 60 * 1000
+                }
             },
-
-            humanBehavior: {
-                avoidHours: [0, 1, 2, 3, 4, 5], // Midnight to dawn
-                preferredHours: [9, 10, 11, 14, 15, 16, 19, 20, 21],
-                slowHours: [12, 13, 22, 23] // Lunch and late night
+            aggressive: { // WARNING: High Risk - ~800+/day
+                delays: {
+                    betweenMessages: { min: 5000, max: 15000 },
+                    betweenBatches: { min: 5 * 60 * 1000, max: 10 * 60 * 1000 },
+                    randomBreaks: { probability: 0.10, min: 2 * 60 * 1000, max: 5 * 60 * 1000 }
+                },
+                limits: {
+                    messagesPerBatch: 40,
+                    messagesPerHour: 80,
+                    messagesPerDay: 1000,
+                    maxBurstSize: 20,
+                    cooldownAfterBurst: 5 * 60 * 1000
+                }
             }
         };
+
+        this.humanBehavior = {
+            avoidHours: [0, 1, 2, 3, 4, 5],
+            preferredHours: [9, 10, 11, 14, 15, 16, 19, 20, 21],
+            slowHours: [12, 13, 22, 23]
+        };
+
+        // Initialize with default mode
+        this.applyMode('balanced');
 
         // Rate limiting state
         this.rateLimiter = {
@@ -55,6 +80,18 @@ class QueueManager {
             lastResetHour: new Date().getHours(),
             consecutiveFailures: 0
         };
+    }
+
+    applyMode(mode) {
+        if (this.modes[mode]) {
+            this.config = {
+                mode,
+                delays: this.modes[mode].delays,
+                limits: this.modes[mode].limits,
+                humanBehavior: this.humanBehavior
+            };
+            console.log(`🛡️ Switched Anti-Ban Mode to: ${mode.toUpperCase()}`);
+        }
     }
 
     /**

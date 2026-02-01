@@ -178,7 +178,7 @@ app.post('/api/whatsapp/disconnect/:accountId', async (req, res) => {
  */
 app.post('/api/whatsapp/prepare-messages', async (req, res) => {
     try {
-        const { eventId, template, customMessage, messagePhase = 'initial' } = req.body;
+        const { eventId, template, customMessage, messagePhase = 'initial', targetAudience = 'all' } = req.body;
 
         // Get event details
         const { data: event, error: eventError } = await supabase
@@ -189,11 +189,23 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
 
         if (eventError) throw eventError;
 
-        // Get guests for this event with card_image_url
-        const { data: guests, error: guestsError } = await supabase
+        // Build query
+        let query = supabase
             .from('guests')
-            .select('id, name, phone, card_image_url, custom_data')
+            .select('id, name, phone, card_image_url, custom_data, rsvp_status')
             .eq('event_id', eventId);
+
+        // Apply filters
+        if (targetAudience === 'confirmed') {
+            query = query.or('rsvp_status.eq.attending,rsvp_status.eq.confirmed');
+        } else if (targetAudience === 'pending') {
+            query = query.is('rsvp_status', null);
+        } else if (targetAudience === 'declined') {
+            query = query.eq('rsvp_status', 'declined');
+        }
+
+        // Get guests
+        const { data: guests, error: guestsError } = await query;
 
         if (guestsError) throw guestsError;
 
@@ -229,7 +241,8 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
         res.json({
             success: true,
             count: messages.length,
-            messages: data
+            messages: data,
+            filteredBy: targetAudience
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -242,13 +255,17 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
  */
 app.post('/api/whatsapp/send-batch', async (req, res) => {
     try {
-        const { eventId } = req.body;
+        const { eventId, mode = 'balanced' } = req.body;
+
+        if (mode) {
+            queueManager.applyMode(mode);
+        }
 
         await queueManager.startSending(eventId);
 
         res.json({
             success: true,
-            message: 'Batch sending started'
+            message: `Batch sending started in ${mode.toUpperCase()} mode`
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });

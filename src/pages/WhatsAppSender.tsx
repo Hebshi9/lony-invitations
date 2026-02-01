@@ -235,21 +235,20 @@ const WhatsAppSender = () => {
                     eventId: selectedEventId,
                     template: messageTemplates[selectedTemplate].text,
                     customMessage,
-                    messagePhase // Add phase selection
+                    messagePhase, // Add phase selection
+                    targetAudience // Add audience selection
                 })
             });
 
             const result = await response.json();
-            if (result.success) {
-                const phaseText = messagePhase === 'initial' ? 'دعوة عامة (بدون كرت)' : 'دعوة شخصية (مع كرت)';
-                alert(`تم تجهيز ${result.count} رسالة - ${phaseText}`);
-            }
         } catch (error: any) {
             alert('خطأ في تجهيز الرسائل: ' + error.message);
         } finally {
             setLoading(false);
         }
     };
+
+    const [safetyMode, setSafetyMode] = useState('balanced');
 
     const handleStartSending = async () => {
         addLog('🖱️ Button Clicked: Start Sending');
@@ -267,13 +266,22 @@ const WhatsAppSender = () => {
             return;
         }
 
+        if (safetyMode === 'aggressive') {
+            if (!confirm('⚠️ تحذير: الوضع السريع يزيد من احتمالية الحظر. هل أنت متأكد؟')) {
+                return;
+            }
+        }
+
         setLoading(true);
         try {
-            addLog(`🚀 Sending request to ${API_URL}/send-batch`);
+            addLog(`🚀 Sending request to ${API_URL}/send-batch (Mode: ${safetyMode})`);
             const response = await fetch(`${API_URL}/send-batch`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ eventId: selectedEventId })
+                body: JSON.stringify({
+                    eventId: selectedEventId,
+                    mode: safetyMode
+                })
             });
 
             const result = await response.json();
@@ -295,6 +303,9 @@ const WhatsAppSender = () => {
 
 
     const guestsWithPhone = guests.filter(g => g.phone);
+    const connectedAccountsCount = accounts.filter(a => a.status === 'connected').length;
+
+    const [targetAudience, setTargetAudience] = useState('all');
 
     return (
         <div className="space-y-6 font-kufi" dir="rtl">
@@ -554,9 +565,42 @@ const WhatsAppSender = () => {
                     {/* Sending Controls */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>4. التحكم (Debug Panel)</CardTitle>
+                            <CardTitle>4. إعدادات الأمان والتحكم</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
+
+                            {/* Safety Mode Selector */}
+                            <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                                <label className="block text-sm font-bold text-gray-700 mb-2">وضع الأمان (Safety Mode):</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                        onClick={() => setSafetyMode('safe')}
+                                        className={`p-2 rounded border text-sm ${safetyMode === 'safe' ? 'bg-green-600 text-white border-green-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
+                                    >
+                                        🛡️ آمن (بطيء)
+                                        <div className="text-[10px] opacity-80">150/يوم</div>
+                                    </button>
+                                    <button
+                                        onClick={() => setSafetyMode('balanced')}
+                                        className={`p-2 rounded border text-sm ${safetyMode === 'balanced' ? 'bg-blue-600 text-white border-blue-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
+                                    >
+                                        ⚖️ متوازن
+                                        <div className="text-[10px] opacity-80">400/يوم</div>
+                                    </button>
+                                    <button
+                                        onClick={() => setSafetyMode('aggressive')}
+                                        className={`p-2 rounded border text-sm ${safetyMode === 'aggressive' ? 'bg-red-600 text-white border-red-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
+                                    >
+                                        🚀 سريع (خطر)
+                                        <div className="text-[10px] opacity-80">1000/يوم</div>
+                                    </button>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-600">
+                                    {safetyMode === 'safe' && 'الأكثر أماناً. ينصح به للحسابات الجديدة.'}
+                                    {safetyMode === 'balanced' && 'الخيار الموصى به لمعظم الحالات.'}
+                                    {safetyMode === 'aggressive' && '⚠️ قد يعرض حسابك للحظر. استخدمه فقط مع حسابات قديمة وموثوقة.'}
+                                </div>
+                            </div>
                             <Button
                                 onClick={handleStartSending}
                                 disabled={loading || queueStatus?.isRunning}

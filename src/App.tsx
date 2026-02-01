@@ -24,7 +24,7 @@ import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import EventSummary from './pages/EventSummary';
-import EventSummary from './pages/EventSummary';
+
 import Login from './pages/Login';
 import { Loader2 } from 'lucide-react';
 

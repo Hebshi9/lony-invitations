@@ -6,6 +6,7 @@ import whatsappService from '../src/services/baileys-service.js';
 import queueManager from '../src/services/queue-manager.js';
 import { createClient } from '@supabase/supabase-js';
 import { fillTemplate, getTemplateVariables } from '../src/services/message-templates.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,6 +26,18 @@ const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.VITE_SUPABASE_ANON_KEY
 );
+
+// Initialize Gemini
+let genAIModel = null;
+if (process.env.VITE_GEMINI_API_KEY) {
+    try {
+        const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY);
+        genAIModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        console.log('✨ Gemini AI Initialized');
+    } catch (e) {
+        console.error('❌ Failed to initialize Gemini:', e);
+    }
+}
 
 // Root route
 app.get('/', (req, res) => {
@@ -156,6 +169,43 @@ app.get('/api/whatsapp/qr/:accountId', (req, res) => {
 });
 
 /**
+ * GET /api/whatsapp/qr-status/:accountId
+ * Get QR code status and connection state
+ */
+app.get('/api/whatsapp/qr-status/:accountId', async (req, res) => {
+    try {
+        const { accountId } = req.params;
+
+        // Check if client is connected
+        const client = whatsappService.clients.get(accountId);
+
+        if (client && client.user) {
+            // Already connected
+            return res.json({
+                success: true,
+                connected: true,
+                qr: null
+            });
+        }
+
+        // Get current QR code if available
+        const qrCode = whatsappService.currentQR?.get(accountId);
+
+        res.json({
+            success: true,
+            connected: false,
+            qr: qrCode || null
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+
+/**
  * POST /api/whatsapp/disconnect/:accountId
  * Disconnect an account
  */
@@ -166,6 +216,73 @@ app.post('/api/whatsapp/disconnect/:accountId', async (req, res) => {
 
         res.json({ success: true });
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============= AI Generation =============
+
+/**
+ * POST /api/whatsapp/generate-message
+ * Generate or polish a message using AI
+ */
+app.post('/api/whatsapp/generate-message', async (req, res) => {
+    try {
+        const { eventId, context, tone = 'formal' } = req.body;
+
+        if (!genAIModel) {
+            return res.status(503).json({
+                success: false,
+                error: 'AI service not configured on server.'
+            });
+        }
+
+        // Fetch event details for context
+        let eventContext = '';
+        if (eventId) {
+            const { data: event } = await supabase
+                .from('events')
+                .select('*')
+                .eq('id', eventId)
+                .single();
+            if (event) {
+                eventContext = `
+                Event: ${event.name}
+                Date: ${event.event_date || 'TBD'}
+                Location: ${event.location || 'TBD'}
+                type: ${event.type || 'Wedding'}
+                `;
+            }
+        }
+
+        const prompt = `
+        You are an expert copywriter for Saudi events (Weddings, gatherings).
+        Write a WhatsApp invitation message.
+        
+        Context:
+        ${eventContext}
+        
+        Tone: ${tone} (Polite, warm, Saudi dialect).
+        
+        Requirements:
+        - Use emojis.
+        - Include placeholders like {{name}} for guest name.
+        - If location is available, mention it.
+        - Keep it concise (under 60 words).
+        - Arabic language only.
+        
+        Current Draft (if any): "${context || ''}"
+        
+        Output only the message text.
+        `;
+
+        const result = await genAIModel.generateContent(prompt);
+        const text = result.response.text().trim();
+
+        res.json({ success: true, message: text });
+
+    } catch (error) {
+        console.error('AI Gen Error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -208,6 +325,19 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
         const { data: guests, error: guestsError } = await query;
 
         if (guestsError) throw guestsError;
+
+        // 🗑️ CLEANUP: Delete previous pending/queued messages for this event and phase
+        // to avoid duplication (the 48/46 issue)
+        const { error: deleteError } = await supabase
+            .from('whatsapp_messages')
+            .delete()
+            .eq('event_id', eventId)
+            .eq('message_phase', messagePhase)
+            .in('status', ['pending', 'queued']);
+
+        if (deleteError) {
+            console.warn('[Prepare] Warning deleting old messages:', deleteError);
+        }
 
         // Prepare messages for each guest
         const messages = [];

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Calendar, Users, Wand2, QrCode, MessageCircle, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Calendar, Users, Wand2, QrCode, MessageCircle, BarChart3, Bot } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface LayoutProps {
@@ -16,7 +16,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         { name: 'إعداد الحدث', href: '/event', icon: Calendar },
         { name: 'قائمة الضيوف', href: '/upload-guests', icon: Users },
         { name: 'استوديو الدعوات', href: '/studio', icon: Wand2 },
-        { name: 'إرسال واتساب', href: '/whatsapp', icon: MessageCircle },
+        { name: 'إرسال واتساب', href: '/whatsapp-sender', icon: MessageCircle },
+        { name: 'Sales AI 🤖', href: '/sales-ai', icon: Bot },
         { name: 'الماسح الضوئي', href: '/scanner', icon: QrCode },
     ];
 

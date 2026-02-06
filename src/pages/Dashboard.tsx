@@ -141,90 +141,88 @@ const Dashboard: React.FC = () => {
 
             {activeTab === 'overview' && (
                 <>
-                    {activeTab === 'overview' && (
-                        <>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="text-lg text-right">إجمالي الأحداث</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <p className="text-3xl font-bold text-blue-600 text-right">
-                                            {loading ? '...' : stats.totalEvents}
-                                        </p>
-                                    </CardContent>
-                                </Card>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg text-right">إجمالي الأحداث</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-3xl font-bold text-blue-600 text-right">
+                                    {loading ? '...' : stats.totalEvents}
+                                </p>
+                            </CardContent>
+                        </Card>
 
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="text-lg text-right">إجمالي الضيوف</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <p className="text-3xl font-bold text-green-600 text-right">
-                                            {loading ? '...' : stats.totalGuests}
-                                        </p>
-                                    </CardContent>
-                                </Card>
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg text-right">إجمالي الضيوف</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-3xl font-bold text-green-600 text-right">
+                                    {loading ? '...' : stats.totalGuests}
+                                </p>
+                            </CardContent>
+                        </Card>
 
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="text-lg text-right">الدعوات المرسلة</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <p className="text-3xl font-bold text-purple-600 text-right">
-                                            {loading ? '...' : stats.sentInvitations}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-                            </div>
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg text-right">الدعوات المرسلة</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-3xl font-bold text-purple-600 text-right">
+                                    {loading ? '...' : stats.sentInvitations}
+                                </p>
+                            </CardContent>
+                        </Card>
+                    </div>
 
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="text-right">الأحداث الأخيرة</CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-right">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الحدث</th>
-                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
-                                                    <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-right">الأحداث الأخيرة</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-right">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الحدث</th>
+                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
+                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {loading ? (
+                                            <tr>
+                                                <td colSpan={3} className="px-6 py-4 text-center text-gray-500">جاري التحميل...</td>
+                                            </tr>
+                                        ) : recentEvents.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={3} className="px-6 py-4 text-center text-gray-500">لا توجد أحداث حتى الآن</td>
+                                            </tr>
+                                        ) : (
+                                            recentEvents.map((event) => (
+                                                <tr key={event.id}>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.name}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date}</td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        <Button size="sm" variant="outline">عرض التفاصيل</Button>
+                                                    </td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="bg-white divide-y divide-gray-200">
-                                                {loading ? (
-                                                    <tr>
-                                                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500">جاري التحميل...</td>
-                                                    </tr>
-                                                ) : recentEvents.length === 0 ? (
-                                                    <tr>
-                                                        <td colSpan={3} className="px-6 py-4 text-center text-gray-500">لا توجد أحداث حتى الآن</td>
-                                                    </tr>
-                                                ) : (
-                                                    recentEvents.map((event) => (
-                                                        <tr key={event.id}>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.name}</td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date}</td>
-                                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                                <Button size="sm" variant="outline">عرض التفاصيل</Button>
-                                                            </td>
-                                                        </tr>
-                                                    ))
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </>
-                    )}
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </>
+            )}
 
-                    {activeTab === 'intake' && <IntakeRequestList />}
-                    {activeTab === 'orders' && <OrderList />}
-                    {/* {activeTab === 'templates' && <CardTemplateEditor />} */}
-                </div>
-            );
+            {activeTab === 'intake' && <IntakeRequestList />}
+            {activeTab === 'orders' && <OrderList />}
+            {/* {activeTab === 'templates' && <CardTemplateEditor />} */}
+        </div>
+    );
 };
 
-            export default Dashboard;
+export default Dashboard;

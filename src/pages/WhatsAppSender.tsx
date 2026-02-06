@@ -1,662 +1,611 @@
-
-import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-    Send, Pause, Play, StopCircle, Plus, Trash2, Wifi, WifiOff,
-    ArrowRight, ArrowLeft, CheckCircle, Loader2, Sparkles
+    Send, Play, Square,
+    RefreshCw, Settings,
+    Bot, CheckCircle, User, Zap, Clock, Shield,
+    Sparkles, Loader2
 } from 'lucide-react';
-import geminiService from '../services/gemini-service';
+import { Button } from '../components/ui/Button';
 import { supabase } from '../lib/supabaseClient';
-import messageTemplates, { fillTemplate, getTemplateVariables } from '../services/message-templates';
-import QRCode from 'react-qr-code';
+import config from '../lib/config';
+import ConnectionPanel from '../components/WhatsApp/ConnectionPanel';
+import GuestTable from '../components/WhatsApp/GuestTable';
 
-const API_URL = `http://${window.location.hostname}:3001/api/whatsapp`;
+const API_URL = config.api.whatsapp;
 
-const WhatsAppSender = () => {
-    const [events, setEvents] = useState<any[]>([]);
-    const [selectedEventId, setSelectedEventId] = useState('');
-    const [guests, setGuests] = useState<any[]>([]);
-    const [accounts, setAccounts] = useState<any[]>([]);
-    const [selectedTemplate, setSelectedTemplate] = useState('default');
-    const [customMessage, setCustomMessage] = useState(messageTemplates.default.text);
-    const [messagePhase, setMessagePhase] = useState<'initial' | 'personalized'>('initial');
-    const [queueStatus, setQueueStatus] = useState<any>(null);
-    const [loading, setLoading] = useState(false);
-    const [activeQR, setActiveQR] = useState<{ accountId: string, qr: string } | null>(null);
+// --- Sub-Components ---
 
-    // Debug logging state
-    const [debugLogs, setDebugLogs] = useState<string[]>([]);
-    const addLog = (msg: string) => setDebugLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
-
-
-
-    // New account form
-    const [newAccountPhone, setNewAccountPhone] = useState('');
-    const [newAccountName, setNewAccountName] = useState('');
-
-    useEffect(() => {
-        fetchEvents();
-        fetchAccounts();
-
-        // Poll queue status every 5 seconds
-        const interval = setInterval(fetchQueueStatus, 5000);
-        return () => clearInterval(interval);
-    }, []);
-
-    useEffect(() => {
-        if (selectedEventId) {
-            fetchGuests(selectedEventId);
-        }
-    }, [selectedEventId]);
-
-    useEffect(() => {
-        setCustomMessage(messageTemplates[selectedTemplate].text);
-    }, [selectedTemplate]);
-
-    const fetchEvents = async () => {
-        const { data } = await supabase.from('events').select('*');
-        if (data) {
-            setEvents(data);
-            // Auto-select first event if strictly one exists or none selected
-            if (data.length > 0 && !selectedEventId) {
-                const firstId = data[0].id;
-                setSelectedEventId(firstId);
-                addLog(`Auto-selected event: ${data[0].name}`);
-            }
-        }
+const StatCard = ({ label, value, sub, color, icon }: any) => {
+    const bgMap: any = {
+        indigo: 'bg-gradient-to-br from-indigo-50 to-white text-indigo-700 border-indigo-100',
+        green: 'bg-gradient-to-br from-emerald-50 to-white text-emerald-700 border-emerald-100',
+        purple: 'bg-gradient-to-br from-purple-50 to-white text-purple-700 border-purple-100',
+        red: 'bg-gradient-to-br from-rose-50 to-white text-rose-700 border-rose-100',
+        gray: 'bg-gradient-to-br from-gray-50 to-white text-gray-700 border-gray-100',
+        amber: 'bg-gradient-to-br from-amber-50 to-white text-amber-700 border-amber-100',
     };
-
-    const fetchGuests = async (eventId: string) => {
-        const { data } = await supabase
-            .from('guests')
-            .select('id, name, phone, card_image_url, qr_token, rsvp_status')
-            .eq('event_id', eventId);
-        if (data) setGuests(data);
-    };
-
-    const fetchAccounts = async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts`);
-            const result = await response.json();
-            if (result.success) {
-                setAccounts(result.accounts);
-            }
-        } catch (error) {
-            console.error('Error fetching accounts:', error);
-        }
-    };
-
-    const fetchQueueStatus = async () => {
-        if (!selectedEventId) return;
-
-        try {
-            const response = await fetch(`${API_URL}/status/${selectedEventId}`);
-            const result = await response.json();
-            if (result.success) {
-                setQueueStatus(result.status);
-            }
-        } catch (error) {
-            console.error('Error fetching status:', error);
-        }
-    };
-
-    const handleAddAccount = async () => {
-        if (!newAccountPhone) {
-            alert('الرجاء إدخال رقم الهاتف');
-            return;
-        }
-
-        try {
-            const response = await fetch(`${API_URL}/accounts`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    phone: newAccountPhone,
-                    name: newAccountName || newAccountPhone
-                })
-            });
-
-            const result = await response.json();
-            if (result.success) {
-                setNewAccountPhone('');
-                setNewAccountName('');
-                fetchAccounts();
-                alert('تم إضافة الحساب بنجاح!');
-            }
-        } catch (error) {
-            alert('خطأ في إضافة الحساب: ' + error.message);
-        }
-    };
-
-    const handleConnectAccount = async (accountId: string) => {
-        try {
-            addLog(`🔌 Attempting to connect account: ${accountId}`);
-
-            // Start connection
-            const response = await fetch(`${API_URL}/connect/${accountId}`, {
-                method: 'POST'
-            });
-
-            const result = await response.json();
-            addLog(`📡 Response received: ${JSON.stringify(result)}`);
-
-            if (result.success) {
-                addLog(`✅ Connection initiated, listening for QR code...`);
-
-                // Listen for QR code using Server-Sent Events
-                const eventSource = new EventSource(`${API_URL}/qr/${accountId}`);
-
-                eventSource.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.qr) {
-                            addLog(`📱 QR Code received!`);
-                            setActiveQR({ accountId, qr: data.qr });
-                        }
-                    } catch (err: any) {
-                        addLog(`⚠️ Error parsing QR data: ${err.message}`);
-                    }
-                };
-
-                eventSource.onerror = (error) => {
-                    addLog(`❌ EventSource error`);
-                    eventSource.close();
-                };
-
-                // Poll for connection status
-                const statusInterval = setInterval(async () => {
-                    const checkResponse = await fetch(`${API_URL}/accounts`);
-                    const checkResult = await checkResponse.json();
-                    if (checkResult.success) {
-                        const updatedAccount = checkResult.accounts.find((a: any) => a.id === accountId);
-                        if (updatedAccount && updatedAccount.status === 'connected') {
-                            addLog(`✅ Account connected successfully!`);
-                            clearInterval(statusInterval);
-                            eventSource.close();
-                            setActiveQR(null);
-                            fetchAccounts();
-                            alert('✅ تم الربط بنجاح!');
-                        }
-                    }
-                }, 3000);
-
-                // Stop polling after 2 minutes
-                setTimeout(() => {
-                    clearInterval(statusInterval);
-                    eventSource.close();
-                    setActiveQR(null);
-                    addLog(`⏱️ Connection timeout`);
-                }, 120000);
-            } else {
-                addLog(`❌ Connection failed: ${result.error || 'Unknown error'}`);
-                alert('فشل الاتصال: ' + (result.error || 'خطأ غير معروف'));
-            }
-        } catch (error: any) {
-            addLog(`❌ Error: ${error.message}`);
-            alert('خطأ في الاتصال: ' + error.message);
-        }
-    };
-
-
-    const handleDeleteAccount = async (accountId: string) => {
-        if (!confirm('هل أنت متأكد من حذف هذا الحساب؟')) return;
-
-        try {
-            const response = await fetch(`${API_URL}/accounts/${accountId}`, {
-                method: 'DELETE'
-            });
-
-            const result = await response.json();
-            if (result.success) {
-                if (activeQR?.accountId === accountId) {
-                    setActiveQR(null);
-                }
-                await fetchAccounts();
-                alert('تم حذف الحساب');
-            }
-        } catch (error) {
-            alert('خطأ في الحذف: ' + error.message);
-        }
-    };
-
-    const handlePrepareMessages = async () => {
-        if (!selectedEventId) {
-            alert('الرجاء اختيار حدث');
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const response = await fetch(`${API_URL}/prepare-messages`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    eventId: selectedEventId,
-                    template: messageTemplates[selectedTemplate].text,
-                    customMessage,
-                    messagePhase, // Add phase selection
-                    targetAudience // Add audience selection
-                })
-            });
-
-            const result = await response.json();
-        } catch (error: any) {
-            alert('خطأ في تجهيز الرسائل: ' + error.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const [safetyMode, setSafetyMode] = useState('balanced');
-
-    const handleStartSending = async () => {
-        addLog('🖱️ Button Clicked: Start Sending');
-
-        if (!selectedEventId) {
-            addLog('❌ Error: No event selected');
-            alert('⛔ توقف: لم يتم اختيار حدث! الرجاء اختيار حدث من القائمة.');
-            return;
-        }
-
-        const connectedAccounts = accounts.filter(a => a.status === 'connected');
-        if (connectedAccounts.length === 0) {
-            addLog('❌ Error: No connected accounts');
-            alert(`⛔ توقف: لا يوجد حسابات متصلة!\nالمتصلة: 0`);
-            return;
-        }
-
-        if (safetyMode === 'aggressive') {
-            if (!confirm('⚠️ تحذير: الوضع السريع يزيد من احتمالية الحظر. هل أنت متأكد؟')) {
-                return;
-            }
-        }
-
-        setLoading(true);
-        try {
-            addLog(`🚀 Sending request to ${API_URL}/send-batch (Mode: ${safetyMode})`);
-            const response = await fetch(`${API_URL}/send-batch`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    eventId: selectedEventId,
-                    mode: safetyMode
-                })
-            });
-
-            const result = await response.json();
-            addLog(`✅ Server Response: ${JSON.stringify(result)}`);
-
-            if (result.success) {
-                alert('✅ تم إرسال أمر البدء للسيرفر بنجاح!');
-            } else {
-                alert('⚠️ السيرفر رد بخطأ: ' + (result.error || 'غير معروف'));
-            }
-        } catch (error: any) {
-            addLog(`🔥 Network Error: ${error.message}`);
-            alert('❌ فشل الاتصال بالسيرفر! تأكد أن السيرفر يعمل.\n' + error.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-
-
-    const guestsWithPhone = guests.filter(g => g.phone);
-    const connectedAccountsCount = accounts.filter(a => a.status === 'connected').length;
-
-    const [targetAudience, setTargetAudience] = useState('all');
-
     return (
-        <div className="space-y-6 font-kufi" dir="rtl">
-            <h1 className="text-3xl font-bold text-lony-navy font-amiri">إرسال WhatsApp</h1>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Sidebar */}
-                <div className="space-y-6">
-                    {/* Event Selection */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>1. اختر الحدث</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <select
-                                className="w-full p-2 border rounded-lg"
-                                value={selectedEventId}
-                                onChange={(e) => setSelectedEventId(e.target.value)}
-                            >
-                                <option value="">-- اختر --</option>
-                                {events.map(e => (
-                                    <option key={e.id} value={e.id}>{e.name}</option>
-                                ))}
-                            </select>
-                            {guestsWithPhone.length > 0 && (
-                                <div className="mt-2 text-sm text-green-600">
-                                    ✓ {guestsWithPhone.length} ضيف لديهم أرقام
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Accounts Management */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>2. حسابات WhatsApp</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {/* Add Account */}
-                            <div className="space-y-2">
-                                <input
-                                    type="text"
-                                    placeholder="رقم الهاتف (مثال: +966...)"
-                                    className="w-full p-2 border rounded text-sm"
-                                    value={newAccountPhone}
-                                    onChange={(e) => setNewAccountPhone(e.target.value)}
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="اسم الحساب (اختياري)"
-                                    className="w-full p-2 border rounded text-sm"
-                                    value={newAccountName}
-                                    onChange={(e) => setNewAccountName(e.target.value)}
-                                />
-                                <Button
-                                    onClick={handleAddAccount}
-                                    className="w-full"
-                                    size="sm"
-                                >
-                                    <Plus className="w-4 h-4 ml-2" />
-                                    إضافة حساب
-                                </Button>
-                            </div>
-
-                            {/* Accounts List */}
-                            <div className="space-y-2">
-                                {accounts.map(account => (
-                                    <div key={account.id} className="border rounded p-3 space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                {account.status === 'connected' ? (
-                                                    <Wifi className="w-4 h-4 text-green-500" />
-                                                ) : (
-                                                    <WifiOff className="w-4 h-4 text-gray-400" />
-                                                )}
-                                                <span className="font-medium text-sm">{account.name}</span>
-                                            </div>
-                                            <button
-                                                onClick={() => handleDeleteAccount(account.id)}
-                                                className="text-red-500 hover:text-red-700"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                        <div className="text-xs text-gray-600">
-                                            {account.phone}
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                            {account.messages_sent_today}/{account.daily_limit} رسالة اليوم
-                                        </div>
-                                        {account.status !== 'connected' && (
-                                            <div className="space-y-2">
-                                                <Button
-                                                    onClick={() => handleConnectAccount(account.id)}
-                                                    size="sm"
-                                                    className="w-full"
-                                                >
-                                                    اتصال
-                                                </Button>
-                                                {activeQR?.accountId === account.id && activeQR.qr && (
-                                                    <div className="bg-white p-2 rounded border flex flex-col items-center gap-2 animate-in fade-in zoom-in duration-300">
-                                                        <QRCode value={activeQR.qr} size={150} />
-                                                        <span className="text-[10px] text-gray-500 text-center">امسح الكود لربط الحساب</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </CardContent>
-                    </Card>
+        <div className={`p-4 rounded-xl border shadow-sm transition-all duration-300 hover:shadow-md ${bgMap[color] || bgMap.gray} flex flex-col justify-between h-28 group relative overflow-hidden`}>
+            <div className="flex justify-between items-start z-10">
+                <span className="text-[10px] font-bold opacity-70 uppercase tracking-widest">{label}</span>
+                <div className="p-1.5 rounded-lg bg-white/50 backdrop-blur-sm shadow-sm group-hover:scale-110 transition-transform">
+                    {icon}
                 </div>
-
-                {/* Main Area */}
-                <div className="lg:col-span-2 space-y-6">
-                    {/* Message Phase Selection */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>3. نوع الرسالة</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="grid grid-cols-2 gap-4">
-                                <button
-                                    onClick={() => setMessagePhase('initial')}
-                                    className={`p-4 rounded-lg border-2 transition-all ${messagePhase === 'initial'
-                                        ? 'border-blue-500 bg-blue-50'
-                                        : 'border-gray-300 hover:border-blue-300'
-                                        }`}
-                                >
-                                    <div className="text-center">
-                                        <div className="text-2xl mb-2">📧</div>
-                                        <div className="font-bold text-gray-800">دعوة عامة</div>
-                                        <div className="text-sm text-gray-600 mt-1">بدون كرت شخصي</div>
-                                        <div className="text-xs text-gray-500 mt-2">
-                                            للتأكد من الحضور أولاً
-                                        </div>
-                                    </div>
-                                </button>
-
-                                <button
-                                    onClick={() => setMessagePhase('personalized')}
-                                    className={`p-4 rounded-lg border-2 transition-all ${messagePhase === 'personalized'
-                                        ? 'border-purple-500 bg-purple-50'
-                                        : 'border-gray-300 hover:border-purple-300'
-                                        }`}
-                                >
-                                    <div className="text-center">
-                                        <div className="text-2xl mb-2">🎴</div>
-                                        <div className="font-bold text-gray-800">دعوة شخصية</div>
-                                        <div className="text-sm text-gray-600 mt-1">مع كرت شخصي</div>
-                                        <div className="text-xs text-gray-500 mt-2">
-                                            إرسال الكرت مباشرة
-                                        </div>
-                                    </div>
-                                </button>
-                            </div>
-
-                            {messagePhase === 'initial' && (
-                                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                                    💡 <strong>نظام المرحلتين:</strong> أرسل دعوة عامة أولاً، ثم أرسل الكروت الشخصية للمؤكدين فقط
-                                </div>
-                            )}
-
-                            {/* New: Client Tools (Host Info) */}
-                            <div className="mt-6 pt-6 border-t border-gray-100">
-                                <h4 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                                    <span className="bg-lony-gold/20 p-1 rounded">👑</span>
-                                    أدوات العميل (Client Tools)
-                                </h4>
-                                <Button
-                                    onClick={async () => {
-                                        if (!selectedEventId) return;
-                                        // Fetch event details to get PIN and Token
-                                        const { data: event } = await supabase.select('*').from('events').eq('id', selectedEventId).single();
-                                        if (!event) return;
-
-                                        const message = `مرحباً عزيزي العميل 👑\n\nإليك رابط لوحة التحكم الخاصة بك لمتابعة الحضور:\n${window.location.origin}/client/dashboard/${event.id}\n\n${event.host_pin ? `رمز المضيف (للمسح بالكاميرا): ${event.host_pin}` : ''}`;
-
-                                        // Open WhatsApp with this message
-                                        // In a real app we might send it via the connected bot, but for now specific admin sending is manual or via bot if selected
-                                        const phone = prompt('أدخل رقم جوال العميل (مع مفتاح الدولة):', event.client_phone || '');
-                                        if (phone) {
-                                            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
-                                        }
-                                    }}
-                                    variant="outline"
-                                    className="w-full border-lony-gold text-lony-navy hover:bg-lony-gold/10"
-                                >
-                                    إرسال بيانات الدخول للعميل (واتساب)
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Template Selection */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>4. قالب الرسالة</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <select
-                                className="w-full p-2 border rounded-lg"
-                                value={selectedTemplate}
-                                onChange={(e) => setSelectedTemplate(e.target.value)}
-                            >
-                                {Object.entries(messageTemplates).map(([key, template]) => (
-                                    <option key={key} value={key}>{template.name}</option>
-                                ))}
-                            </select>
-
-                            <div className="relative">
-                                <textarea
-                                    className="w-full p-3 border rounded-lg font-kufi"
-                                    rows={8}
-                                    value={customMessage}
-                                    onChange={(e) => setCustomMessage(e.target.value)}
-                                    placeholder="اكتب رسالتك هنا..."
-                                />
-                                {geminiService.isConfigured() && (
-                                    <button
-                                        onClick={async () => {
-                                            if (!customMessage) return;
-                                            setLoading(true);
-                                            const polished = await geminiService.polishMessage(customMessage);
-                                            setCustomMessage(polished);
-                                            setLoading(false);
-                                        }}
-                                        disabled={loading || !customMessage}
-                                        className="absolute bottom-2 left-2 flex items-center gap-1 bg-purple-100 text-purple-700 px-2 py-1 rounded-md text-xs hover:bg-purple-200 transition-colors"
-                                    >
-                                        <Sparkles className="w-3 h-3" />
-                                        {loading ? 'جاري التحسين...' : 'تحسين بالذكاء الاصطناعي'}
-                                    </button>
-                                )}
-                            </div>
-
-                            <div className="text-sm text-gray-600">
-                                <p className="font-medium mb-1">المتغيرات المتاحة:</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {['{{name}}', '{{event}}', '{{date}}', '{{location}}'].map(v => (
-                                        <code key={v} className="bg-gray-100 px-2 py-1 rounded">{v}</code>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <Button
-                                onClick={handlePrepareMessages}
-                                disabled={loading || !selectedEventId}
-                                className="w-full"
-                            >
-                                تجهيز الرسائل
-                            </Button>
-                        </CardContent>
-                    </Card>
-
-                    {/* Sending Controls */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>4. إعدادات الأمان والتحكم</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-
-                            {/* Safety Mode Selector */}
-                            <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                                <label className="block text-sm font-bold text-gray-700 mb-2">وضع الأمان (Safety Mode):</label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button
-                                        onClick={() => setSafetyMode('safe')}
-                                        className={`p-2 rounded border text-sm ${safetyMode === 'safe' ? 'bg-green-600 text-white border-green-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
-                                    >
-                                        🛡️ آمن (بطيء)
-                                        <div className="text-[10px] opacity-80">150/يوم</div>
-                                    </button>
-                                    <button
-                                        onClick={() => setSafetyMode('balanced')}
-                                        className={`p-2 rounded border text-sm ${safetyMode === 'balanced' ? 'bg-blue-600 text-white border-blue-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
-                                    >
-                                        ⚖️ متوازن
-                                        <div className="text-[10px] opacity-80">400/يوم</div>
-                                    </button>
-                                    <button
-                                        onClick={() => setSafetyMode('aggressive')}
-                                        className={`p-2 rounded border text-sm ${safetyMode === 'aggressive' ? 'bg-red-600 text-white border-red-700 shadow-sm' : 'bg-white hover:bg-gray-50'}`}
-                                    >
-                                        🚀 سريع (خطر)
-                                        <div className="text-[10px] opacity-80">1000/يوم</div>
-                                    </button>
-                                </div>
-                                <div className="mt-2 text-xs text-gray-600">
-                                    {safetyMode === 'safe' && 'الأكثر أماناً. ينصح به للحسابات الجديدة.'}
-                                    {safetyMode === 'balanced' && 'الخيار الموصى به لمعظم الحالات.'}
-                                    {safetyMode === 'aggressive' && '⚠️ قد يعرض حسابك للحظر. استخدمه فقط مع حسابات قديمة وموثوقة.'}
-                                </div>
-                            </div>
-                            <Button
-                                onClick={handleStartSending}
-                                disabled={loading || queueStatus?.isRunning}
-                                className={`w-full py-6 text-lg font-bold ${queueStatus?.isRunning ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
-                            >
-                                {loading ? 'جاري الاتصال...' : queueStatus?.isRunning ? 'Running...' : '🚀 بدء الإرسال (Start Sending)'}
-                            </Button>
-
-                            {/* Debug Logs Box */}
-                            <div className="bg-black text-green-400 p-4 rounded-lg font-mono text-xs h-40 overflow-y-auto" dir="ltr">
-                                <div className="font-bold border-b border-gray-700 mb-2 pb-1">System Logs:</div>
-                                {debugLogs.length === 0 && <div className="opacity-50">Waiting for actions...</div>}
-                                {debugLogs.map((log, i) => (
-                                    <div key={i}>{log}</div>
-                                ))}
-                            </div>
-
-                            {/* Progress */}
-                            {queueStatus?.stats && (
-                                <div className="space-y-2">
-                                    <div className="grid grid-cols-4 gap-2 text-center">
-                                        <div className="bg-gray-100 p-3 rounded">
-                                            <div className="text-2xl font-bold">{queueStatus.stats.pending}</div>
-                                            <div className="text-xs text-gray-600">قيد الانتظار</div>
-                                        </div>
-                                        <div className="bg-blue-100 p-3 rounded">
-                                            <div className="text-2xl font-bold text-blue-600">{queueStatus.stats.queued}</div>
-                                            <div className="text-xs text-gray-600">في القائمة</div>
-                                        </div>
-                                        <div className="bg-green-100 p-3 rounded">
-                                            <div className="text-2xl font-bold text-green-600">{queueStatus.stats.sent}</div>
-                                            <div className="text-xs text-gray-600">تم الإرسال</div>
-                                        </div>
-                                        <div className="bg-red-100 p-3 rounded">
-                                            <div className="text-2xl font-bold text-red-600">{queueStatus.stats.failed}</div>
-                                            <div className="text-xs text-gray-600">فشل</div>
-                                        </div>
-                                    </div>
-
-                                    {queueStatus.isRunning && (
-                                        <div className="text-center text-sm">
-                                            {queueStatus.isPaused ? (
-                                                <span className="text-yellow-600">⏸️ متوقف مؤقتاً</span>
-                                            ) : (
-                                                <span className="text-green-600">▶️ جاري الإرسال...</span>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                </div>
+            </div>
+            <div className="z-10">
+                <div className="text-3xl font-black tracking-tight mt-1">{value}</div>
+                {sub && <div className="text-[10px] opacity-80 font-medium mt-1 flex items-center gap-1">{sub}</div>}
+            </div>
+            {/* Decoration */}
+            <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12 scale-150 pointer-events-none">
+                {icon}
             </div>
         </div>
     );
 };
 
-export default WhatsAppSender;
+const TemplateVariable = ({ label, value, onClick }: any) => (
+    <button
+        onClick={() => onClick(value)}
+        className="px-2 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-md text-[11px] font-mono border border-indigo-200/50 transition-colors flex items-center gap-1.5 group"
+        title="اضغط للإضافة"
+    >
+        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 group-hover:bg-indigo-600 transition-colors"></div>
+        <span className="font-bold">{label}</span>
+    </button>
+);
+
+const SpeedControl = ({ speed, setSpeed }: any) => (
+    <div className="flex bg-gray-100 p-1 rounded-lg">
+        {['safe', 'balanced', 'fast'].map((s) => (
+            <button
+                key={s}
+                onClick={() => setSpeed(s)}
+                className={`px-3 py-1.5 text-xs rounded-md font-bold transition-all capitalize flex items-center gap-1 ${speed === s
+                    ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-black/5'
+                    : 'text-gray-500 hover:text-gray-700'
+                    }`}
+            >
+                {s === 'safe' && <Shield className="w-3 h-3" />}
+                {s === 'balanced' && <Clock className="w-3 h-3" />}
+                {s === 'fast' && <Zap className="w-3 h-3" />}
+                <span className="hidden sm:inline">{s}</span>
+            </button>
+        ))}
+    </div>
+);
+
+export default function WhatsAppSender() {
+    // === STATE ===
+    const [events, setEvents] = useState<any[]>([]);
+    const [selectedEventId, setSelectedEventId] = useState<string>('');
+    const [accounts, setAccounts] = useState<any[]>([]);
+
+    // Guest Data
+    const [guests, setGuests] = useState<any[]>([]);
+    const [loadingGuests, setLoadingGuests] = useState(false);
+    const [rsvpStats, setRsvpStats] = useState({
+        total: 0, sent: 0, delivered: 0, read: 0, failed: 0,
+        confirmed: 0, declined: 0, maybe: 0
+    });
+
+    // Editor & Campaign
+    const [messageTemplate, setMessageTemplate] = useState('');
+    const [campaignType, setCampaignType] = useState<'invite' | 'qr_code' | 'reminder'>('invite');
+    const [sendingSpeed, setSendingSpeed] = useState<'safe' | 'balanced' | 'fast'>('balanced');
+    const [aiGenerating, setAiGenerating] = useState(false);
+
+    // Queue Status
+    const [queueStatus, setQueueStatus] = useState<any>({
+        isRunning: false, isPaused: false, progress: 0, total: 0
+    });
+    const [logs, setLogs] = useState<string[]>([]);
+
+    // Refs
+    const logContainerRef = useRef<HTMLDivElement>(null);
+    const pollingInterval = useRef<any>(null);
+
+    // === INITIALIZATION ===
+    useEffect(() => {
+        fetchEvents();
+        fetchAccounts();
+        return () => stopPolling();
+    }, []);
+
+    // Scroll logs
+    useEffect(() => {
+        if (logContainerRef.current) {
+            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+    }, [logs]);
+
+    // Update Stats
+    useEffect(() => {
+        if (guests.length > 0) {
+            setRsvpStats({
+                total: guests.length,
+                sent: guests.filter(g => ['sent', 'delivered', 'read'].includes(g.last_message_status)).length,
+                delivered: guests.filter(g => ['delivered', 'read'].includes(g.last_message_status)).length,
+                read: guests.filter(g => g.last_message_status === 'read').length,
+                failed: guests.filter(g => g.last_message_status === 'failed').length,
+                confirmed: guests.filter(g => g.rsvp_status === 'confirmed').length,
+                declined: guests.filter(g => g.rsvp_status === 'declined').length,
+                maybe: guests.filter(g => g.rsvp_status === 'maybe').length,
+            });
+        }
+    }, [guests]);
+
+    // === DATA FETCHING ===
+    const fetchEvents = async () => {
+        const { data } = await supabase
+            .from('events')
+            .select('*')
+            //.in('status', ['active', 'upcoming']) // Fetch all for debugging
+            .order('created_at', { ascending: false });
+        if (data) setEvents(data);
+    };
+
+    const fetchAccounts = async () => {
+        try {
+            const res = await fetch(`${API_URL}/accounts`);
+            const data = await res.json();
+            if (data.success) setAccounts(data.accounts);
+        } catch (e) { addLog('❌ Failed to fetch accounts'); }
+    };
+
+    const fetchGuests = async (eventId: string) => {
+        setLoadingGuests(true);
+        const { data: guestsData, error } = await supabase
+            .from('guests')
+            .select(`
+                id, name, phone, rsvp_status, rsvp_at,
+                whatsapp_messages (
+                    status, message_phase, created_at
+                )
+            `)
+            .eq('event_id', eventId)
+            .order('name');
+
+        if (error) {
+            addLog(`Error: ${error.message}`);
+            setLoadingGuests(false);
+            return;
+        }
+
+        const processed = guestsData.map(g => {
+            const msgs = g.whatsapp_messages || [];
+            msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            const latest = msgs[0];
+            return {
+                ...g,
+                last_message_status: latest?.status || 'pending',
+                last_message_phase: latest?.message_phase,
+                last_interaction: latest?.created_at
+            };
+        });
+
+        setGuests(processed);
+        setLoadingGuests(false);
+    };
+
+    // === ACTIONS ===
+    const handleGenerateAI = async () => {
+        if (!selectedEventId) return alert("اختر مناسبة أولاً");
+        setAiGenerating(true);
+
+        try {
+            const event = events.find(e => e.id === selectedEventId);
+
+            const res = await fetch(`${API_URL}/generate-message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    eventId: selectedEventId,
+                    context: messageTemplate, // Send current text as context for polishing
+                    tone: 'formal'
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                setMessageTemplate(data.message);
+                addLog("✨ AI generated a new template!");
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (e: any) {
+            addLog(`❌ AI Generation Failed: ${e.message}`);
+            alert("فشل التوليد: " + e.message);
+        } finally {
+            setAiGenerating(false);
+        }
+    };
+
+    const handleStartQueue = async () => {
+        if (!selectedEventId) return alert('الرجاء اختيار المناسبة');
+        if (!messageTemplate.trim()) return alert('الرسالة فارغة');
+
+        addLog('⏳ Preparing campaign...');
+        try {
+            // 1. Prepare
+            const prepRes = await fetch(`${API_URL}/prepare-messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    eventId: selectedEventId,
+                    template: messageTemplate,
+                    messagePhase: campaignType, // sent as 'invite' or 'qr_code'
+                    filters: { rsvp_status: campaignType === 'qr_code' ? 'confirmed' : 'all' }
+                })
+            });
+            const prep = await prepRes.json();
+            if (!prep.success) throw new Error(prep.error);
+
+            if (prep.count === 0) return alert('لا يوجد ضيوف مستهدفين بهذه الحملة.');
+
+            if (!confirm(`سيتم إرسال ${prep.count} رسالة (${campaignType === 'qr_code' ? 'كروت باركود' : 'دعوات عامة'}).\nالسرعة: ${sendingSpeed}`)) return;
+
+            // 2. Start
+            const startRes = await fetch(`${API_URL}/send-batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    eventId: selectedEventId,
+                    mode: sendingSpeed // 'fast', 'balanced', 'safe'
+                })
+            });
+
+            if (startRes.ok) {
+                setQueueStatus((p: any) => ({ ...p, isRunning: true }));
+                startPolling(selectedEventId);
+            }
+
+        } catch (e: any) {
+            alert(e.message);
+        }
+    };
+
+    // Polling Logic
+    const startPolling = (eventId: string) => {
+        stopPolling();
+        pollingInterval.current = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_URL}/status/${eventId}`);
+                const data = await res.json();
+                if (data.success && data.status) {
+                    setQueueStatus((prev: any) => ({
+                        ...prev,
+                        isRunning: data.status.isRunning,
+                        isPaused: data.status.isPaused,
+                        processed: (data.status.stats?.sent || 0) + (data.status.stats?.failed || 0),
+                        total: (data.status.stats?.pending || 0) + (data.status.stats?.queued || 0) + (data.status.stats?.sent || 0) + (data.status.stats?.failed || 0)
+                    }));
+
+                    if (data.status.lastLog) {
+                        setLogs(prev => {
+                            const last = prev[prev.length - 1];
+                            // Avoid duplicates but show new
+                            if (last !== data.status.lastLog && !last?.includes(data.status.lastLog)) {
+                                return [...prev.slice(-99), `[SERVER] ${data.status.lastLog}`];
+                            }
+                            return prev;
+                        });
+                    }
+
+                    if (data.status.isRunning) fetchGuests(eventId);
+                }
+            } catch (e) { }
+        }, 2000);
+    };
+
+    const stopPolling = () => { if (pollingInterval.current) clearInterval(pollingInterval.current); };
+
+    // Other handlers
+    const handleEventSelect = (e: any) => {
+        setSelectedEventId(e.target.value);
+        if (e.target.value) { fetchGuests(e.target.value); startPolling(e.target.value); }
+        else { setGuests([]); stopPolling(); }
+    };
+    const addLog = (m: string) => setLogs(p => [...p.slice(-99), `[${new Date().toLocaleTimeString()}] ${m}`]);
+
+
+    // === RESPONSIVE LAYOUT HELPERS ===
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    // === RENDER ===
+    return (
+        <div className="flex bg-slate-50 h-screen w-full overflow-hidden text-right font-sans" dir="rtl">
+
+            {/* Mobile Sidebar Overlay */}
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/20 z-30 lg:hidden backdrop-blur-sm"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+
+            {/* --- SIDEBAR --- */}
+            <div className={`
+                fixed lg:static inset-y-0 right-0 z-40
+                w-72 bg-white border-l border-gray-200 shadow-2xl lg:shadow-none
+                transform transition-transform duration-300 ease-in-out flex flex-col
+                ${sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
+            `}>
+                <div className="p-4 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50 flex justify-between items-center">
+                    <h2 className="font-bold text-gray-800 flex items-center gap-2 text-lg">
+                        <Settings className="w-5 h-5 text-indigo-600" />
+                        إعدادات الحملة
+                    </h2>
+                    <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 hover:bg-gray-100 rounded-lg text-gray-500">
+                        <Square className="w-5 h-5" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                    {/* Event Selector */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">المناسبة</label>
+                        <select
+                            value={selectedEventId}
+                            onChange={handleEventSelect}
+                            className="w-full p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold text-gray-700 shadow-sm"
+                        >
+                            <option value="">-- اختر المناسبة --</option>
+                            {events.map(e => <option key={e.id} value={e.id}>🎉 {e.name}</option>)}
+                        </select>
+
+                        {/* Event Details Summary */}
+                        {(() => {
+                            const selectedEvent = events.find(e => e.id === selectedEventId);
+                            if (!selectedEventId || !selectedEvent) return null;
+
+                            return (
+                                <div className="mt-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg text-xs space-y-1">
+                                    <div className="flex items-center gap-2 text-indigo-900 font-bold">
+                                        <span className="text-lg">📅</span>
+                                        {selectedEvent.event_date ? new Date(selectedEvent.event_date).toLocaleDateString('ar-SA') : 'غير محدد'}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-indigo-800">
+                                        <span className="text-lg">📍</span> {selectedEvent.location || 'غير محدد'}
+                                    </div>
+                                    <div className="text-[10px] text-indigo-400 font-mono mt-1 pt-1 border-t border-indigo-100">
+                                        ID: {selectedEvent.id?.slice(0, 8)}...
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                    </div>
+
+                    <div className="w-full h-px bg-gray-100" />
+
+                    {/* Campaign Type */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">نوع الحملة</label>
+                        <div className="space-y-2">
+                            <button
+                                onClick={() => setCampaignType('invite')}
+                                className={`w-full p-3 rounded-lg border text-right transition-all flex items-center gap-3 ${campaignType === 'invite' ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                            >
+                                <div className={`p-2 rounded-full ${campaignType === 'invite' ? 'bg-indigo-200 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
+                                    <Send className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <div className="font-bold text-sm text-gray-800">دعوة عامة</div>
+                                    <div className="text-[10px] text-gray-500">نص + صورة (لكل القائمة)</div>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={() => setCampaignType('qr_code')}
+                                className={`w-full p-3 rounded-lg border text-right transition-all flex items-center gap-3 ${campaignType === 'qr_code' ? 'bg-purple-50 border-purple-500 ring-1 ring-purple-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                            >
+                                <div className={`p-2 rounded-full ${campaignType === 'qr_code' ? 'bg-purple-200 text-purple-700' : 'bg-gray-100 text-gray-500'}`}>
+                                    <Zap className="w-4 h-4" />
+                                </div>
+                                <div>
+                                    <div className="font-bold text-sm text-gray-800">إرسال كروت الباركود</div>
+                                    <div className="text-[10px] text-gray-500">فقط للمؤكدين (Confirmed)</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="w-full h-px bg-gray-100" />
+
+                    {/* Devices */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">الأجهزة المتصلة</label>
+                        <ConnectionPanel accounts={accounts} onAccountsChange={fetchAccounts} addLog={addLog} />
+                    </div>
+
+                </div>
+            </div>
+
+            {/* --- MAIN CONTENT AREA --- */}
+            <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
+
+                {/* Mobile Header Toggle */}
+                <div className="lg:hidden bg-white border-b p-4 flex justify-between items-center shrink-0">
+                    <h1 className="font-bold text-gray-800">إدارة الحملات</h1>
+                    <button onClick={() => setSidebarOpen(true)} className="p-2 bg-gray-100 rounded-lg text-gray-600">
+                        <Settings className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Main Scrollable Area */}
+                <div className="flex-1 overflow-y-auto p-4 lg:p-6 scroll-smooth">
+                    <div className="max-w-[1600px] mx-auto space-y-6">
+
+                        {/* Top Header & Stats */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                                <div>
+                                    <h1 className="text-2xl font-black text-slate-800 mb-1">لوحة التحكم</h1>
+                                    <p className="text-sm text-slate-500 font-medium">إدارة الحملات والردود الذكية</p>
+                                </div>
+                                <Button variant="outline" size="sm" onClick={() => selectedEventId && fetchGuests(selectedEventId)}>
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${loadingGuests ? 'animate-spin' : ''}`} /> تحديث البيانات
+                                </Button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                                <StatCard label="المجموع" value={rsvpStats.total} color="gray" icon={<User className="w-4 h-4" />} />
+                                <StatCard label="تم الإرسال" value={rsvpStats.sent} color="indigo" icon={<Send className="w-4 h-4" />} />
+                                <StatCard label="تم الاستلام" value={rsvpStats.delivered} color="green" icon={<CheckCircle className="w-4 h-4" />} />
+                                <StatCard label="تأكيد حضور" value={rsvpStats.confirmed} color="purple" icon={<span className="text-sm">✨</span>} />
+                                <StatCard label="اعتذارات" value={rsvpStats.declined} color="red" icon={<span className="text-sm">❌</span>} />
+                                <StatCard label="ربما" value={rsvpStats.maybe} color="amber" icon={<span className="text-sm">🤔</span>} />
+                            </div>
+                        </div>
+
+                        {/* Two Column Layout: Table vs Editor */}
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 pb-20">
+
+                            {/* Left: Guest Table (Takes more space) */}
+                            <div className="xl:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
+                                <div className="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0">
+                                    <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
+                                        <User className="w-4 h-4 text-gray-400" />
+                                        قائمة الضيوف
+                                    </h3>
+                                    <div className="flex gap-2 text-[10px] text-gray-500 bg-white px-3 py-1.5 rounded-full border shadow-sm">
+                                        <span className="font-bold text-gray-700">العدد: {guests.length}</span>
+                                        <span className="text-gray-300">|</span>
+                                        <span className="text-green-600 font-bold">المؤكدين: {rsvpStats.confirmed}</span>
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-hidden relative">
+                                    <div className="absolute inset-0">
+                                        <GuestTable guests={guests} onRetry={() => { }} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right: Smart Editor (Sticky on large screens) */}
+                            <div className="xl:col-span-4 flex flex-col gap-4">
+                                {!selectedEventId ? (
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
+                                        <Bot className="w-16 h-16 mb-4 opacity-10" />
+                                        <h3 className="font-bold text-lg text-gray-600 mb-2">اختر مناسبة للبدء</h3>
+                                        <p className="text-sm text-gray-400 max-w-[200px] leading-relaxed">
+                                            قم باختيار المناسبة من القائمة الجانبية لتفعيل المحرر الذكي وإطلاق الحملات.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Editor Card */}
+                                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
+                                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                                                <div className="flex items-center gap-2">
+                                                    <Bot className="w-5 h-5 text-indigo-600" />
+                                                    <span className="font-bold text-gray-800 text-sm">المحرر الذكي</span>
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={handleGenerateAI}
+                                                    disabled={aiGenerating}
+                                                    className="h-8 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3"
+                                                >
+                                                    <Sparkles className={`w-3 h-3 mr-1.5 ${aiGenerating ? 'animate-spin' : ''}`} />
+                                                    {aiGenerating ? 'جاري الصياغة...' : 'توليد AI'}
+                                                </Button>
+                                            </div>
+
+                                            <div className="p-4 flex flex-col gap-4">
+                                                {/* Variables */}
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block tracking-wider">متغيرات ذكية</label>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <TemplateVariable label="اسم الضيف" value="{{name}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                        <TemplateVariable label="الموقع" value="{{location}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                        <TemplateVariable label="رابط الباركود" value="{{qr_link}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                    </div>
+                                                </div>
+
+                                                {/* Textarea */}
+                                                <div className="relative group min-h-[300px] xl:min-h-[250px]">
+                                                    <textarea
+                                                        value={messageTemplate}
+                                                        onChange={e => setMessageTemplate(e.target.value)}
+                                                        className="w-full h-full p-4 bg-gray-50/50 border-2 border-dashed border-gray-200 focus:border-solid focus:border-indigo-500 focus:bg-white rounded-xl resize-none transition-all text-sm leading-relaxed outline-none"
+                                                        placeholder="اكتب رسالتك هنا... استخدم المتغيرات أعلاه لتخصيص الرسالة."
+                                                        style={{ height: '100%', minHeight: '200px' }}
+                                                    />
+                                                    <div className="absolute bottom-3 left-3 text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded backdrop-blur border border-gray-100">
+                                                        {messageTemplate.length} حرف
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Sending Settings */}
+                                            <div className="p-4 bg-gray-50 border-t border-gray-100 space-y-4">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-xs font-bold text-gray-600">سرعة الإرسال</label>
+                                                    <SpeedControl speed={sendingSpeed} setSpeed={setSendingSpeed} />
+                                                </div>
+
+                                                {/* Action Buttons */}
+                                                {!queueStatus.isRunning ? (
+                                                    <Button
+                                                        onClick={handleStartQueue}
+                                                        className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-95 text-sm font-bold flex justify-center items-center gap-2 rounded-xl"
+                                                    >
+                                                        <Send className="w-5 h-5" />
+                                                        إرسال الحملة الآن
+                                                    </Button>
+                                                ) : (
+                                                    <div className="space-y-3">
+                                                        <div className="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm">
+                                                            <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2">
+                                                                <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> جاري الإرسال...</span>
+                                                                <span>{queueStatus.processed} / {queueStatus.total}</span>
+                                                            </div>
+                                                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                                                                <div className="h-full bg-indigo-500 transition-all duration-300 rounded-full" style={{ width: `${(queueStatus.processed / (queueStatus.total || 1)) * 100}%` }}></div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <Button size="sm" variant="outline" className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300" onClick={async () => {
+                                                                await fetch(`${API_URL}/stop`, { method: 'POST' });
+                                                                setQueueStatus((p: any) => ({ ...p, isRunning: false }));
+                                                            }}>إيقاف كلي</Button>
+                                                            <Button size="sm" variant="secondary" className="flex-1 bg-indigo-50 text-indigo-700 border border-indigo-100" onClick={async () => {
+                                                                const ep = queueStatus.isPaused ? 'resume' : 'pause';
+                                                                await fetch(`${API_URL}/${ep}`, { method: 'POST' });
+                                                                setQueueStatus((p: any) => ({ ...p, isPaused: !p.isPaused }));
+                                                            }}>{queueStatus.isPaused ? 'استئناف' : 'إيقاف مؤقت'}</Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Logs */}
+                                        <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-xl flex flex-col border border-slate-800">
+                                            <div className="px-4 py-2 bg-slate-950 text-[10px] text-slate-400 font-mono flex justify-between items-center border-b border-slate-800">
+                                                <span className="font-bold flex items-center gap-2">
+                                                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                                    Console Output
+                                                </span>
+                                            </div>
+                                            <div ref={logContainerRef} className="h-40 xl:h-48 overflow-y-auto p-4 text-[10px] font-mono space-y-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                                                {logs.length === 0 && <span className="text-slate-600 italic opacity-50 block text-center mt-10">System ready... No activity yet.</span>}
+                                                {logs.map((l, i) => (
+                                                    <div key={i} className="text-emerald-400 border-l-2 border-slate-700 pl-3 leading-relaxed opacity-90 hover:opacity-100 transition-opacity break-words">
+                                                        <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString('en-US', { hour12: false })}]</span>
+                                                        {l}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

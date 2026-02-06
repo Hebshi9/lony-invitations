@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # GitHub Setup Script for Lony Invitations Platform
 # Bash Script (for Git Bash on Windows)

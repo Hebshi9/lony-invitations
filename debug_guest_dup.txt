@@ -1,0 +1,61 @@
+﻿[dotenv@17.2.3] injecting env (3) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+--- Debugging Guest Status ---
+Found 4 guest(s).
+
+=== Guest: احمد الحبشي ===
+ID: 1ae88131-e6ea-4f96-85b2-0fee990adf8a
+Phone: +966503678789
+Status: pending
+Last Updated: 2026-01-31T00:18:46.730534
+Card URL: YES
+Messages:
+- [sent] Phase: general | Sent: 2026-01-27T19:40:53.55
+- [failed] Phase: general | Sent: null
+
+=== Guest: احمد الحبشي ===
+ID: 47247c82-db5b-47ca-b691-12cfc3bd1a17
+Phone: +966503678789
+Status: pending
+Last Updated: 2026-01-28T16:19:41.502462
+Card URL: YES
+Messages:
+- [pending] Phase: general | Sent: null
+- [pending] Phase: general | Sent: null
+- [pending] Phase: general | Sent: null
+- [sent] Phase: general | Sent: 2026-01-28T16:21:17.594
+
+=== Guest: الضيف الكريم (Test User) ===
+ID: e0122221-f942-485f-939d-e004151fcade
+Phone: 966503678789
+Status: confirmed
+Last Updated: 2026-02-02T18:43:07.660327
+Card URL: NO
+Messages:
+- [sent] Phase: initial | Sent: 2026-02-02T18:42:45.44
+- [sent] Phase: initial | Sent: 2026-02-02T18:21:47.819
+- [sent] Phase: initial | Sent: 2026-02-02T18:14:29.54
+- [sent] Phase: initial | Sent: 2026-02-02T18:04:52.974
+
+=== Guest: احمد الحبشي ===
+ID: 7a84e0a8-4ef3-46af-885e-e8516d3c2cf8
+Phone: +966503678789
+Status: pending
+Last Updated: 2026-01-31T00:18:55.250144
+Card URL: YES
+Messages:
+- [sent] Phase: general | Sent: 2026-01-27T19:41:10.477
+- [failed] Phase: general | Sent: null
+- [sent] Phase: general | Sent: 2026-01-16T12:17:33.915
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null
+- [failed] Phase: general | Sent: null

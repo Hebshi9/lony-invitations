@@ -16,6 +16,8 @@ interface AdminMessage {
     retry_count: number;
     sender_account: string;
     whatsapp_rsvp_status: string;
+    reply_type?: string;
+    ai_response?: string;
 }
 
 export default function AdminWhatsAppView({ eventId }: { eventId: string }) {
@@ -171,16 +173,26 @@ export default function AdminWhatsAppView({ eventId }: { eventId: string }) {
                                     </td>
                                     <td className="p-3 text-center">
                                         {msg.whatsapp_rsvp_status === 'confirmed' && (
-                                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">✅</span>
+                                            <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">✅ تأكيد</span>
                                         )}
                                         {msg.whatsapp_rsvp_status === 'declined' && (
-                                            <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">❌</span>
+                                            <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs">❌ اعتذار</span>
                                         )}
                                         {msg.whatsapp_rsvp_status === 'maybe' && (
-                                            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">❓</span>
+                                            <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">❓ قد يحضر</span>
+                                        )}
+                                        {msg.reply_type === 'sales_inquiry' && (
+                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">🤖 عميل محتمل</span>
                                         )}
                                     </td>
-                                    <td className="p-3 font-mono text-xs">{msg.sender_account || '-'}</td>
+                                    <td className="p-3 font-mono text-xs">
+                                        {msg.sender_account || '-'}
+                                        {msg.ai_response && (
+                                            <div className="mt-1 text-[10px] text-blue-600 italic">
+                                                AI: {msg.ai_response}
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="p-3">
                                         {msg.error_message && (
                                             <div className="flex items-start gap-2 text-xs text-red-600 max-w-md">

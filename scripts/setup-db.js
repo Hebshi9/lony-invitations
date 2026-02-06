@@ -30,14 +30,36 @@ async function setupDatabase() {
     await client.connect();
     console.log('Connected to database...');
 
+    // 1. Run Base Schema
     const schemaPath = path.join(__dirname, '../supabase/schema.sql');
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    if (fs.existsSync(schemaPath)) {
+      console.log('Executing base schema...');
+      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+      await client.query(schemaSql);
+    }
 
-    console.log('Executing schema...');
-    // Split by semicolon to run statements individually if needed, but simple query usually works for DDL
-    await client.query(schemaSql);
+    // 2. Run Migrations
+    const migrationsDir = path.join(__dirname, '../supabase/migrations');
+    if (fs.existsSync(migrationsDir)) {
+      console.log('Checking for migrations...');
+      const files = fs.readdirSync(migrationsDir)
+        .filter(f => f.endsWith('.sql'))
+        .sort(); // Ensure chronological order
 
-    console.log('Database setup complete! Tables and policies created.');
+      for (const file of files) {
+        console.log(`Running migration: ${file}`);
+        const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+        try {
+          await client.query(sql);
+          console.log(`  ✅ Success: ${file}`);
+        } catch (err) {
+          console.error(`  ❌ Failed: ${file}`, err.message);
+          // Continue? Usually we might stop, but for dev we try to proceed to apply other fixes
+        }
+      }
+    }
+
+    console.log('Database setup complete!');
   } catch (err) {
     console.error('Error setting up database:', err);
   } finally {

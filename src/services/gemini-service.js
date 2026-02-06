@@ -1,11 +1,11 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Initialize Gemini
-const API_KEY = typeof import.meta !== 'undefined' && import.meta.env
-    ? import.meta.env.VITE_GEMINI_API_KEY
-    : '';
+const API_KEY = process.env.VITE_GEMINI_API_KEY || '';
 
-const genAI = new GoogleGenerativeAI(API_KEY || '');
+const genAI = new GoogleGenerativeAI(API_KEY);
 
 class GeminiService {
     constructor() {

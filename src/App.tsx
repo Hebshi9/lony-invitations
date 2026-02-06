@@ -18,8 +18,9 @@ import InspectorLogin from './pages/InspectorLogin';
 import GuestView from './pages/GuestView';
 import ClientIntake from './pages/ClientIntake';
 import GuestLanding from './pages/GuestLanding';
-import WhatsAppHub from './pages/WhatsAppHub';
+
 import WhatsAppSender from './pages/WhatsAppSender';
+import SalesAI from './pages/SalesAI';
 import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
@@ -82,8 +83,10 @@ const AppContent: React.FC = () => {
                 <Route path="/event" element={<EventManager />} />
                 <Route path="/upload-guests" element={<UploadGuests />} />
                 <Route path="/studio" element={<UnifiedInvitationStudio />} />
-                <Route path="/whatsapp" element={<WhatsAppHub />} />
+
+
                 <Route path="/whatsapp-sender" element={<WhatsAppSender />} />
+                <Route path="/sales-ai" element={<SalesAI />} />
                 <Route path="/quick-upload" element={<QuickWhatsAppUpload />} />
                 <Route path="/external-upload" element={<ExternalCardsUpload />} />
                 <Route path="/analytics" element={<AnalyticsDashboard />} />

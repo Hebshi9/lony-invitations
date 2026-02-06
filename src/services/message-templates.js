@@ -113,6 +113,7 @@ export function getTemplateVariables(guest, event) {
         event: event.name,
         date: formatDate(event.date),
         location: event.location || 'سيتم الإعلان عنه',
+        qr_link: `https://lony-invites.netlify.app/card/${guest.id}`, // Placeholder
         serial: guest.serial || '',
         table: guest.table_no || '',
         // Add any custom data from guest

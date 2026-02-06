@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -7,42 +8,28 @@ const supabase = createClient(
     process.env.VITE_SUPABASE_ANON_KEY
 );
 
-async function checkMessages() {
-    console.log('🔍 Checking WhatsApp messages status...\n');
+async function check() {
+    const results = {};
 
-    // Get all messages
-    const { data: messages, error } = await supabase
-        .from('whatsapp_messages')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
+    const { data: pending } = await supabase.from('whatsapp_messages').select('*').eq('status', 'pending').limit(5);
+    results.pending = pending;
 
-    if (error) {
-        console.error('❌ Error:', error.message);
-        return;
-    }
+    const { data: failed } = await supabase.from('whatsapp_messages').select('*').eq('status', 'failed').limit(5);
+    results.failed = failed;
 
-    console.log(`📊 Found ${messages.length} messages:\n`);
+    const { data: accounts } = await supabase.from('whatsapp_accounts').select('*');
+    results.accounts = accounts;
 
-    messages.forEach((msg, i) => {
-        console.log(`${i + 1}. Phone: ${msg.phone}`);
-        console.log(`   Status: ${msg.status}`);
-        console.log(`   Message: ${msg.message_text.substring(0, 50)}...`);
-        console.log(`   Error: ${msg.error_message || 'None'}`);
-        console.log(`   Created: ${msg.created_at}`);
-        console.log('');
+    const { data: queue } = await supabase.from('whatsapp_messages').select('status').not('status', 'eq', 'sent');
+    // Group by status
+    const stats = {};
+    queue?.forEach(m => {
+        stats[m.status] = (stats[m.status] || 0) + 1;
     });
+    results.stats = stats;
 
-    // Get accounts
-    const { data: accounts } = await supabase
-        .from('whatsapp_accounts')
-        .select('*');
-
-    console.log(`\n📱 WhatsApp Accounts (${accounts?.length || 0}):`);
-    accounts?.forEach(acc => {
-        console.log(`- ${acc.name} (${acc.phone}): ${acc.status}`);
-        console.log(`  Messages today: ${acc.messages_sent_today}/${acc.daily_limit}`);
-    });
+    fs.writeFileSync('debug_output.json', JSON.stringify(results, null, 2));
+    console.log("Done writing to debug_output.json");
 }
 
-checkMessages();
+check().catch(console.error);

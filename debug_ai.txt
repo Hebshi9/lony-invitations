@@ -1,0 +1,19 @@
+﻿✅ [RSVP-AI] API Key found (starts with: AIzaSyDL...)
+🧪 Testing AI Service...
+[RSVP-AI] 🤖 Analyzing with Gemini: "تمام موافقين وجايين"...
+🔴 AI ERROR DETAILS: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+🔴 AI ERROR STACK: Error: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+    at handleResponseNotOk (file:///C:/Users/user/Documents/New%20folder%20(3)/lony-invitations-frontend/node_modules/@google/generative-ai/dist/index.mjs:432:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async makeRequest (file:///C:/Users/user/Documents/New%20folder%20(3)/lony-invitations-frontend/node_modules/@google/generative-ai/dist/index.mjs:401:9)
+    at async generateContent (file:///C:/Users/user/Documents/New%20folder%20(3)/lony-invitations-frontend/node_modules/@google/generative-ai/dist/index.mjs:865:22)
+    at async RSVPAIService.analyzeReply (file:///C:/Users/user/Documents/New%20folder%20(3)/lony-invitations-frontend/src/services/rsvp-ai-service.js:81:28)
+    at async testAI (file:///C:/Users/user/Documents/New%20folder%20(3)/lony-invitations-frontend/scripts/test-ai.js:7:24)
+✅ AI Result: {
+  "is_rsvp": true,
+  "status": "confirmed",
+  "confidence": 0.7,
+  "companion_count": 0,
+  "notes": null,
+  "reasoning": "Keyword match (fallback)"
+}

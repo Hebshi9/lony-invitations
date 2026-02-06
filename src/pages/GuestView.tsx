@@ -1,7 +1,8 @@
 import { useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { CheckCircle, XCircle, Users, Clock, Calendar, Loader2, AlertCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Users, Clock, Calendar, Loader2, AlertCircle, Lock, MapPin } from 'lucide-react';
+import { hasFeature, EventFeatures } from '../lib/features';
 
 interface Guest {
     id: string;
@@ -28,6 +29,7 @@ interface Event {
     qr_activation_enabled?: boolean;
     qr_active_from?: string;
     qr_active_until?: string;
+    features?: Partial<EventFeatures>;
 }
 
 interface Scan {
@@ -94,8 +96,11 @@ export default function GuestView() {
                 const remaining = totalAllowed - totalScanned;
 
                 if (remaining > 0) {
-                    // Perform auto check-in
-                    await performCheckIn(guestData.id, guestData.events);
+                    // AUTO CHECK-IN: Only if 'require_inspector_app' is FALSE
+                    // If true, we only show the view, but DO NOT check them in.
+                    if (!hasFeature(guestData.events, 'require_inspector_app')) {
+                        await performCheckIn(guestData.id, guestData.events);
+                    }
                 }
             }
         } catch (error) {
@@ -497,6 +502,24 @@ export default function GuestView() {
                     <p>Powered by <span className="font-bold text-indigo-600">Lony Invitations</span></p>
                 </div>
             </div>
+
+            {/* SECURITY OVERLAY: If Inspector App Required, show floating alert that this view is Read-Only */}
+            {event && hasFeature(event, 'require_inspector_app') && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md p-4 border-t border-gray-200 shadow-[0_-5px_20px_rgba(0,0,0,0.1)] z-50 animate-in slide-in-from-bottom">
+                    <div className="max-w-md mx-auto flex items-center gap-4">
+                        <div className="bg-orange-100 p-2 rounded-full">
+                            <Lock className="w-6 h-6 text-orange-600" />
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-gray-800 text-sm">وضع الأمان مفعل</h4>
+                            <p className="text-xs text-gray-600">
+                                لا يمكن استخدام هذا الرابط للدخول. يجب مسح الرمز من خلال
+                                <span className="font-bold text-indigo-600 mx-1">تطبيق المشرفين</span>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

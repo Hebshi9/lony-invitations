@@ -1,0 +1,11 @@
+﻿✅ [RSVP-AI] API Key found (starts with: AIzaSyDL...)
+🧪 Testing AI Service...
+[RSVP-AI] 🤖 Analyzing with Gemini: "تمام موافقين وجايين"...
+✅ AI Result: {
+  "is_rsvp": true,
+  "status": "confirmed",
+  "confidence": 0.95,
+  "companion_count": 0,
+  "notes": null,
+  "reasoning": "الرد صريح ويؤكد الحضور دون ذكر عدد المرافقين."
+}

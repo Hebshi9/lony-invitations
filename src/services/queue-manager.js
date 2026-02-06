@@ -11,7 +11,7 @@ class QueueManager {
     constructor() {
         this.isRunning = false;
         this.isPaused = false;
-        this.currentEventId = null;
+
 
         // 🛡️ Anti-Ban Configuration
         this.config = {
@@ -94,6 +94,11 @@ class QueueManager {
         }
     }
 
+    log(message) {
+        console.log(message);
+        this.lastLog = message;
+    }
+
     /**
      * Start sending messages for an event
      */
@@ -106,7 +111,7 @@ class QueueManager {
         this.isPaused = false;
         this.currentEventId = eventId;
 
-        console.log(`Starting queue for event ${eventId}`);
+        this.log(`Starting queue for event ${eventId}`);
         // Do not await processQueue, let it run in background
         this.processQueue().catch(err => {
             console.error('Queue processing ended with error:', err);
@@ -118,64 +123,51 @@ class QueueManager {
      * Process the message queue
      */
     async processQueue() {
-        console.log('🚀 Queue processing started loop...');
+        this.log('🚀 Queue processing started loop...');
         console.log(`📍 Current Event ID: ${this.currentEventId}`);
 
         while (this.isRunning && !this.isPaused) {
             try {
-                console.log('\n--- Starting new batch cycle ---');
-
                 // Reset daily counts if needed
                 await this.resetDailyCounts();
 
                 // Get available accounts
                 const availableAccounts = await this.getAvailableAccounts();
-                console.log(`📊 Found ${availableAccounts.length} available accounts`);
-                availableAccounts.forEach(acc => {
-                    console.log(`  - ${acc.name} (${acc.phone}): ${acc.messages_sent_today}/${acc.daily_limit} messages`);
-                });
+                this.log(`📊 Found ${availableAccounts.length} available accounts`);
 
                 if (availableAccounts.length === 0) {
-                    console.log('⚠️ No available accounts. Pausing queue.');
+                    this.log('⚠️ No available accounts. Pausing queue.');
                     this.pause();
                     break;
                 }
 
                 // Get pending messages
                 const pendingMessages = await this.getPendingMessages();
-                console.log(`📩 Found ${pendingMessages.length} pending messages for event ${this.currentEventId}`);
-
-                if (pendingMessages.length > 0) {
-                    console.log('First 3 messages:');
-                    pendingMessages.slice(0, 3).forEach((msg, i) => {
-                        console.log(`  ${i + 1}. ${msg.phone}: ${msg.message_text.substring(0, 30)}...`);
-                    });
-                }
+                this.log(`📩 Found ${pendingMessages.length} pending messages`);
 
                 if (pendingMessages.length === 0) {
-                    console.log('✅ No more pending messages. Queue complete.');
+                    this.log('✅ No more pending messages. Queue complete.');
                     this.stop();
                     break;
                 }
 
                 // Distribute messages across available accounts
-                console.log('📤 Distributing messages...');
+                this.log(`📤 Distributing ${pendingMessages.length} messages...`);
                 await this.distributeMessages(pendingMessages, availableAccounts);
 
                 // Wait before next batch
                 if (this.isRunning && !this.isPaused) {
                     const batchDelay = this.getSmartDelay('batch');
-                    console.log(`⏳ Waiting ${(batchDelay / 1000 / 60).toFixed(1)} minutes before next batch...`);
+                    this.log(`⏳ Waiting ${(batchDelay / 1000 / 60).toFixed(1)} min for next batch...`);
                     await this.sleep(batchDelay);
                 }
             } catch (error) {
                 console.error('🔥 CRITICAL ERROR in Queue Loop:', error);
-                console.error('Stack:', error.stack);
                 this.stop();
                 break;
             }
         }
-        console.log('🛑 Queue processing loop ended.');
+        this.log('🛑 Queue processing loop ended.');
     }
 
     /**
@@ -198,7 +190,7 @@ class QueueManager {
                 // Check if we can send now (rate limiting)
                 const canSend = await this.canSendNow();
                 if (!canSend) {
-                    console.log('⏸️ Rate limit reached, pausing queue...');
+                    this.log('⏸️ Rate limit reached, pausing queue...');
                     this.pause();
                     break;
                 }
@@ -207,7 +199,7 @@ class QueueManager {
 
                 // Smart delay between messages
                 const delay = this.getSmartDelay('message');
-                console.log(`⏱️ Waiting ${(delay / 1000).toFixed(1)}s before next message...`);
+                this.log(`⏱️ Waiting ${(delay / 1000).toFixed(1)}s (Safe Mode)...`);
                 await this.sleep(delay);
             }
         }
@@ -217,23 +209,29 @@ class QueueManager {
      * Send a single message
      */
     async sendMessage(account, message) {
+        console.log(`[QueueManager] 📤 Attempting to send to ${message.phone} via account ${account.phone || account.id}`);
+        console.log(`[QueueManager] Message ID: ${message.id}, Phase: ${message.message_phase}`);
+
         try {
             // Update status to 'queued'
             await supabase
                 .from('whatsapp_messages')
                 .update({ status: 'queued' })
                 .eq('id', message.id);
+            console.log(`[QueueManager] ✓ Status updated to 'queued'`);
 
             // Add slight variation to message (anti-detection)
             const variedMessage = this.addMessageVariation(message.message_text);
 
             // Send via WhatsApp
-            await whatsappService.sendMessage(
+            console.log(`[QueueManager] 📤 Calling whatsappService.sendMessage...`);
+            const result = await whatsappService.sendMessage(
                 account.id,
                 message.phone,
                 variedMessage,
                 message.image_url
             );
+            console.log(`[QueueManager] 🎉 WhatsApp send successful:`, result);
 
             // Update status to 'sent'
             await supabase
@@ -244,6 +242,7 @@ class QueueManager {
                     sender_account: account.phone
                 })
                 .eq('id', message.id);
+            console.log(`[QueueManager] ✓ Database updated: status='sent'`);
 
             // Increment account message count
             await supabase
@@ -256,18 +255,21 @@ class QueueManager {
             // Record successful send
             this.recordMessageSent();
 
-            console.log(`✓ Sent message to ${message.phone} via ${account.phone}`);
+            this.log(`✅ Sent message to ${message.phone} via ${account.phone}`);
+            console.log(`[QueueManager] =========================================\n`);
 
         } catch (error) {
-            console.error(`✗ Failed to send message to ${message.phone}:`, error);
+            console.error(`[QueueManager] ❌ SEND FAILED for ${message.phone}:`);
+            console.error(`[QueueManager] Error details:`, error.message);
+            console.error(`[QueueManager] Full error:`, error);
 
             // Check for ban warning signs
             const warningStatus = this.checkWarningSign(error);
             if (warningStatus === 'STOP') {
-                // Queue already stopped by checkWarningSign
+                console.error(`[QueueManager] 🚨 Critical warning - stopping queue`);
                 return;
             } else if (warningStatus === 'PAUSE') {
-                console.log('⚠️ Pausing due to warning signs...');
+                console.log('[QueueManager] ⚠️ Warning sign detected - pausing queue');
                 this.pause();
             }
 
@@ -277,9 +279,12 @@ class QueueManager {
                 .update({
                     status: 'failed',
                     error_message: error.message,
-                    retry_count: message.retry_count + 1
+                    retry_count: (message.retry_count || 0) + 1
                 })
                 .eq('id', message.id);
+
+            this.log(`❌ Failed to send to ${message.phone}: ${error.message}`);
+            console.log(`[QueueManager] =========================================\n`);
         }
     }
 
@@ -381,7 +386,8 @@ class QueueManager {
                 isRunning: false,
                 isPaused: false,
                 eventId: null,
-                stats: null
+                stats: null,
+                lastLog: this.lastLog || 'No activity'
             };
         }
 
@@ -406,7 +412,8 @@ class QueueManager {
             isRunning: this.isRunning,
             isPaused: this.isPaused,
             eventId: this.currentEventId,
-            stats: statusCounts
+            stats: statusCounts,
+            lastLog: this.lastLog || 'Processing...'
         };
     }
 

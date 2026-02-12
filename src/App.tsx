@@ -8,6 +8,7 @@ import EventManager from './pages/EventManager';
 import UploadGuests from './pages/UploadGuests';
 
 import UnifiedInvitationStudio from './pages/UnifiedInvitationStudio';
+import InvitationStudio from './pages/InvitationStudio';
 import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
 import Scanner from './pages/Scanner';
@@ -83,6 +84,7 @@ const AppContent: React.FC = () => {
                 <Route path="/event" element={<EventManager />} />
                 <Route path="/upload-guests" element={<UploadGuests />} />
                 <Route path="/studio" element={<UnifiedInvitationStudio />} />
+                <Route path="/studio-new" element={<InvitationStudio />} />
 
 
                 <Route path="/whatsapp-sender" element={<WhatsAppSender />} />

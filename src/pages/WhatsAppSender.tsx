@@ -93,6 +93,7 @@ export default function WhatsAppSender() {
     const [messageTemplate, setMessageTemplate] = useState('');
     const [campaignType, setCampaignType] = useState<'invite' | 'qr_code' | 'reminder'>('invite');
     const [sendingSpeed, setSendingSpeed] = useState<'safe' | 'balanced' | 'fast'>('balanced');
+    const [useButtons, setUseButtons] = useState(true);
     const [aiGenerating, setAiGenerating] = useState(false);
 
     // Queue Status
@@ -251,7 +252,8 @@ export default function WhatsAppSender() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     eventId: selectedEventId,
-                    mode: sendingSpeed // 'fast', 'balanced', 'safe'
+                    mode: sendingSpeed, // 'fast', 'balanced', 'safe'
+                    useButtons: useButtons
                 })
             });
 
@@ -543,6 +545,19 @@ export default function WhatsAppSender() {
                                                 <div className="flex justify-between items-center">
                                                     <label className="text-xs font-bold text-gray-600">سرعة الإرسال</label>
                                                     <SpeedControl speed={sendingSpeed} setSpeed={setSendingSpeed} />
+                                                </div>
+
+                                                <div className="flex justify-between items-center py-2 border-t border-gray-100/50">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-xs font-bold text-gray-700">استخدام الأزرار التفاعلية</span>
+                                                        <span className="text-[10px] text-gray-400">✅ تأكيد / ❌ اعتذار</span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setUseButtons(!useButtons)}
+                                                        className={`w-12 h-6 rounded-full transition-colors relative ${useButtons ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                                                    >
+                                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${useButtons ? 'right-1' : 'left-1'}`} />
+                                                    </button>
                                                 </div>
 
                                                 {/* Action Buttons */}

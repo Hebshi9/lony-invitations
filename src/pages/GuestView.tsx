@@ -46,6 +46,13 @@ export default function GuestView() {
     const [loading, setLoading] = useState(true);
     const [scans, setScans] = useState<Scan[]>([]);
     const [checkingIn, setCheckingIn] = useState(false);
+    const [currentTime, setCurrentTime] = useState(new Date());
+
+    // Update current time every second to handle transitions
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         if (qr_token) {
@@ -222,19 +229,18 @@ export default function GuestView() {
     }
 
     // Check QR activation window
-    const now = new Date();
+    const now = currentTime;
     const qrActiveFrom = event.qr_active_from ? new Date(event.qr_active_from) : null;
     const qrActiveUntil = event.qr_active_until ? new Date(event.qr_active_until) : null;
     const qrActivationEnabled = event.qr_activation_enabled || false;
 
     let qrStatus: 'active' | 'not_started' | 'expired' = 'active';
-    let timeUntilActive = 0;
 
     if (qrActivationEnabled) {
-        if (qrActiveFrom && now < qrActiveFrom) {
+        // Use a 500ms safety buffer to prevent micro-checks and reload loops
+        if (qrActiveFrom && now.getTime() < (qrActiveFrom.getTime() - 500)) {
             qrStatus = 'not_started';
-            timeUntilActive = qrActiveFrom.getTime() - now.getTime();
-        } else if (qrActiveUntil && now > qrActiveUntil) {
+        } else if (qrActiveUntil && now.getTime() > qrActiveUntil.getTime()) {
             qrStatus = 'expired';
         }
     }
@@ -253,9 +259,9 @@ export default function GuestView() {
                 const now = new Date().getTime();
                 const distance = targetDate.getTime() - now;
 
-                if (distance < 0) {
+                if (distance <= 0) {
                     clearInterval(timer);
-                    window.location.reload(); // Reload when countdown ends
+                    // No reload needed, the parent's currentTime state update will handle the transition
                     return;
                 }
 

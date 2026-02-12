@@ -6,8 +6,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import lonySalesAI from '../src/services/lony-sales-ai.js';
 import rsvpAI from '../src/services/rsvp-ai-service.js';
 import { fillTemplate, getTemplateVariables } from '../src/services/message-templates.js';
 
@@ -16,10 +14,10 @@ const PORT = process.env.PORT || 3001;
 
 // Global Error Handlers to prevent crash
 process.on('uncaughtException', (err) => {
-    console.error('💥 Uncaught Exception:', err);
+    console.error('💥 Uncaught Exception:', err.message, err.stack);
 });
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('💥 Unhandled Rejection:', reason);
+    console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 const EVOLUTION_URL = process.env.EVOLUTION_URL || 'http://localhost:8081';
@@ -41,18 +39,6 @@ const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.VITE_SUPABASE_ANON_KEY
 );
-
-// Initialize Gemini
-let genAIModel = null;
-if (process.env.VITE_GEMINI_API_KEY) {
-    try {
-        const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY);
-        genAIModel = genAI.getGenerativeModel({ model: 'gemini-pro' });
-        console.log('✨ Gemini AI Initialized');
-    } catch (e) {
-        console.error('❌ Failed to initialize Gemini:', e);
-    }
-}
 
 // Job State Management
 let jobState = {
@@ -202,32 +188,31 @@ app.get('/api/whatsapp/accounts', async (req, res) => {
 app.post('/api/whatsapp/accounts', async (req, res) => {
     try {
         const { phone, name, daily_limit } = req.body;
-        // Use a clean ID
-        const id = phone.replace(/[^0-9]/g, '');
 
-        // Try to save to DB, but don't fail if DB is slow
-        try {
-            await supabase
-                .from('whatsapp_accounts')
-                .upsert([{
-                    id: id,
-                    phone,
-                    name: name || phone,
-                    daily_limit: daily_limit || 170,
-                    is_active: true
-                }]);
-        } catch (e) {
-            console.error('DB Upsert Error:', e);
-        }
+        // 1. Upsert into Supabase to get/generate a UUID
+        const { data: upsertData, error: upsertError } = await supabase
+            .from('whatsapp_accounts')
+            .upsert({
+                phone: phone,
+                name: name || phone,
+                daily_limit: daily_limit || 170,
+                status: 'disconnected'
+            }, { onConflict: 'phone' })
+            .select()
+            .single();
 
-        // Create instance in Evolution
+        if (upsertError) throw upsertError;
+
+        const accountId = upsertData.id;
+
+        // 2. Create instance in Evolution using the UUID
         await callEvolution('/instance/create', 'POST', {
-            instanceName: id,
+            instanceName: accountId,
             qrcode: true,
             integration: "WHATSAPP-BAILEYS"
         });
 
-        res.json({ success: true, account: { id, phone, name } });
+        res.json({ success: true, account: { id: accountId, phone, name } });
     } catch (error) {
         console.error('Error creating account:', error);
         res.status(500).json({ success: false, error: error.message });
@@ -318,11 +303,16 @@ app.post('/webhook', async (req, res) => {
         const phone = '+' + (msg.key?.remoteJid?.split('@')[0] || '');
         const messageText = msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption || '';
+            msg.message?.imageMessage?.caption ||
+            msg.message?.buttonsResponseMessage?.selectedDisplayText ||
+            msg.message?.templateButtonReplyMessage?.selectedDisplayText || '';
 
-        if (!messageText) return res.sendStatus(200);
+        const selectedButtonId = msg.message?.buttonsResponseMessage?.selectedButtonId ||
+            msg.message?.templateButtonReplyMessage?.selectedId || '';
 
-        console.log(`[Webhook] 📨 From ${phone}: "${messageText}"`);
+        if (!messageText && !selectedButtonId) return res.sendStatus(200);
+
+        console.log(`[Webhook] 📨 From ${phone}: "${messageText}" (Button: ${selectedButtonId})`);
 
         try {
             // 1. Identify Context (Guest or Client)
@@ -357,33 +347,70 @@ app.post('/webhook', async (req, res) => {
                 // --- ATTEMPT RSVP FLOW ---
                 if (guest) {
                     console.log(`[Webhook] 👤 Guest identified: ${guest.name}. Checking for RSVP content...`);
-                    const analysis = await rsvpAI.analyzeReply(messageText, guest.name);
 
-                    // Only treat as RSVP if confidence is decent OR status is clear
-                    // If it's just "chatting" (status=null or low confidence), we fall through to Sales AI
-                    if (analysis.is_rsvp || analysis.status || analysis.confidence > 0.6) {
+                    let rsvpStatus = null;
+                    let confidence = 0;
+
+                    // A. Check for Button Response
+                    if (selectedButtonId) {
+                        if (selectedButtonId.includes('accept') || selectedButtonId.includes('confirm')) {
+                            rsvpStatus = 'confirmed';
+                            confidence = 1.0;
+                        } else if (selectedButtonId.includes('decline') || selectedButtonId.includes('cancel')) {
+                            rsvpStatus = 'declined';
+                            confidence = 1.0;
+                        }
+                    }
+
+                    // B. AI Analysis Fallback
+                    let analysis = { is_rsvp: false, status: null, confidence: 0 };
+                    if (!rsvpStatus && messageText) {
+                        analysis = await rsvpAI.analyzeReply(messageText, guest.name);
+                        if (analysis.is_rsvp || analysis.status || analysis.confidence > 0.6) {
+                            rsvpStatus = analysis.status;
+                            confidence = analysis.confidence;
+                        }
+                    } else if (rsvpStatus) {
+                        analysis = { is_rsvp: true, status: rsvpStatus, confidence: confidence };
+                    }
+
+                    if (rsvpStatus) {
                         handledAsRSVP = true;
 
                         // Save Reply
-                        await supabase.from('whatsapp_replies').insert({
+                        const { error: replyError } = await supabase.from('whatsapp_replies').insert({
                             guest_id: guest.id,
                             event_id: guest.event_id,
                             phone: phone,
-                            reply_text: messageText,
-                            is_rsvp: analysis.is_rsvp,
-                            rsvp_response: analysis.status,
-                            ai_confidence: analysis.confidence
+                            reply_text: messageText || `Button: ${selectedButtonId}`,
+                            is_rsvp: true,
+                            rsvp_response: rsvpStatus,
+                            ai_confidence: confidence || 0
                         });
 
-                        if (analysis.status) {
+                        if (replyError) {
+                            console.warn('[Webhook] ⚠️ whatsapp_replies insert failed (maybe RLS?), trying whatsapp_rsvp...');
+                            const { error: rsvpError } = await supabase.from('whatsapp_rsvp').insert({
+                                guest_id: guest.id,
+                                event_id: guest.event_id,
+                                response: rsvpStatus,
+                                response_message: messageText || `Button: ${selectedButtonId}`
+                            });
+                            if (rsvpError) console.error('[Webhook] ❌ both RSVP tables failed:', rsvpError.message);
+                        }
+
+                        if (rsvpStatus) {
                             // Update RSVP status
-                            await supabase.from('guests').update({
-                                rsvp_status: analysis.status,
+                            const { error: guestError } = await supabase.from('guests').update({
+                                rsvp_status: rsvpStatus,
                                 rsvp_at: new Date().toISOString()
                             }).eq('id', guest.id);
 
+                            if (guestError) console.error('[Webhook] ❌ Guest update error:', guestError.message);
+                            else console.log(`[Webhook] ✅ Guest ${guest.name} status updated to ${rsvpStatus}`);
+
                             // Auto-send card if confirmed
-                            if (analysis.status === 'confirmed') {
+                            if (rsvpStatus === 'confirmed') {
                                 if (guest.card_image_url) {
                                     const reply = `شكراً لتأكيد حضورك يا ${guest.name} 🌹\nهذا كرت الدخول الخاص بك. نتشرف بك.`;
                                     await callEvolution(`/message/sendMedia/${accountId}`, 'POST', {
@@ -408,114 +435,12 @@ app.post('/webhook', async (req, res) => {
                             }
                         }
                     } else {
-                        console.log(`[Webhook] Message from guest "${messageText}" does not look like RSVP (Confidence: ${analysis.confidence}). Passing to Sales AI.`);
                     }
                 }
             }
 
             if (!handledAsRSVP) {
-                // --- SALES AGENT FLOW (Fallback for everyone) ---
-                console.log(`[Webhook] 🤖 Processing as General Inquiry / Sales: ${phone}`);
-
-                // 1. Find or create conversation
-                let { data: conversation } = await supabase
-                    .from('sales_conversations')
-                    .select('*')
-                    .eq('phone', phone)
-                    .eq('status', 'active')
-                    .maybeSingle();
-
-                if (!conversation) {
-                    const { data: newConv } = await supabase
-                        .from('sales_conversations')
-                        .insert({
-                            phone: phone,
-                            status: 'active',
-                            message_count: 0,
-                            client_name: guest ? guest.name : undefined
-                        })
-                        .select()
-                        .single();
-                    conversation = newConv;
-                    console.log(`[Sales AI] 🆕 New conversation for ${phone}`);
-                }
-
-                // Append guest context if available
-                let context = [];
-                if (guest) {
-                    context.push({
-                        role: "system",
-                        content: `User Context: This user is already a guest named "${guest.name}" invited to event ID ${guest.event_id}. Treat them warmly as an existing contact.`
-                    });
-                }
-
-                // 2. Get AI Response
-                const aiResult = await lonySalesAI.generateResponse(messageText, context);
-                console.log(`[Sales AI] Intent: ${aiResult.intent}, Priority: ${aiResult.priority}`);
-
-                // 3. Save messages
-                await supabase.from('sales_messages').insert([
-                    {
-                        conversation_id: conversation.id,
-                        direction: 'incoming',
-                        sender_phone: phone,
-                        message_text: messageText
-                    },
-                    {
-                        conversation_id: conversation.id,
-                        direction: 'outgoing',
-                        message_text: aiResult.response,
-                        ai_response: aiResult.response,
-                        ai_intent: aiResult.intent,
-                        ai_priority: aiResult.priority
-                    }
-                ]);
-
-                // 4. Update conversation
-                await supabase.from('sales_conversations').update({
-                    overall_intent: aiResult.intent,
-                    priority: aiResult.priority,
-                    ai_notes: aiResult.notes
-                }).eq('id', conversation.id);
-
-                // 5. Send AI Response
-                await callEvolution(`/message/sendText/${accountId}`, 'POST', {
-                    number: msg.key.remoteJid,
-                    textMessage: { text: aiResult.response }
-                });
-
-                // 6. Handle Escalation
-                if (aiResult.intent === 'escalation' || aiResult.priority === 'high') {
-                    console.log(`[Webhook] 🚨 ESCALATION for ${phone}`);
-
-                    await supabase.from('sales_conversations').update({
-                        escalated: true,
-                        escalated_at: new Date().toISOString(),
-                        status: 'escalated'
-                    }).eq('id', conversation.id);
-
-                    const { data: messages } = await supabase
-                        .from('sales_messages')
-                        .select('*')
-                        .eq('conversation_id', conversation.id)
-                        .order('created_at', { ascending: true });
-
-                    let summary = `🚨 *تصعيد من Sales AI*\n\n📱 ${phone} ${guest ? `(${guest.name})` : ''}\n🎯 ${aiResult.intent}\n⚠️ ${aiResult.priority}\n\n💬 المحادثة:\n`;
-                    messages?.slice(-5).forEach(m => {
-                        const p = m.direction === 'incoming' ? '👤' : '🤖';
-                        const t = m.direction === 'incoming' ? m.message_text : m.ai_response;
-                        summary += `${p}: ${t}\n`;
-                    });
-
-                    const ADMIN_PHONE = process.env.ADMIN_PHONE;
-                    if (ADMIN_PHONE) {
-                        const adminJid = ADMIN_PHONE.replace('+', '').replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-                        await callEvolution(`/message/sendText/${accountId}`, 'POST', {
-                            number: adminJid,
-                            textMessage: { text: summary }
-                        }).catch(e => console.error('[Admin notify error]', e));
-                    }
-                }
+                console.log(`[Webhook] ℹ️ Message from ${phone} is not an RSVP. Skipping automated response.`);
             }
         } catch (error) {
             console.error('[Webhook] Error processing message:', error);
@@ -523,59 +448,6 @@ app.post('/webhook', async (req, res) => {
     }
 
     res.sendStatus(200);
-});
-
-// ===== SALES AI ROUTES =====
-
-// Get all conversations
-app.get('/api/sales/conversations', async (req, res) => {
-    const { status, escalated } = req.query;
-
-    let query = supabase.from('sales_dashboard').select('*');
-
-    if (status) query = query.eq('status', status);
-    if (escalated === 'true') query = query.eq('escalated', true);
-
-    const { data, error } = await query.order('last_contact_at', { ascending: false });
-
-    // Handle DB Error but always return success to keep frontend alive
-    if (error) {
-        console.error('DB Error:', error);
-        return res.json({ conversations: [] });
-    }
-    res.json({ conversations: data || [] });
-});
-
-// Get single conversation with messages
-app.get('/api/sales/conversations/:id', async (req, res) => {
-    const { id } = req.params;
-
-    const { data: conversation } = await supabase
-        .from('sales_conversations')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-    const { data: messages } = await supabase
-        .from('sales_messages')
-        .select('*')
-        .eq('conversation_id', id)
-        .order('created_at', { ascending: true });
-
-    res.json({ conversation, messages: messages || [] });
-});
-
-// Get escalated conversations summary for admin
-app.get('/api/sales/escalated-summary', async (req, res) => {
-    const { data } = await supabase
-        .from('sales_dashboard')
-        .select('*')
-        .eq('escalated', true)
-        .eq('status', 'escalated')
-        .order('escalated_at', { ascending: false })
-        .limit(10);
-
-    res.json({ escalated: data || [] });
 });
 
 // Sending
@@ -626,9 +498,9 @@ app.post('/api/whatsapp/send', async (req, res) => {
     }
 });
 
-// Bulk Sending Logic (Kept mostly same, using callEvolution)
+// Bulk Sending Logic
 app.post('/api/whatsapp/send-batch', async (req, res) => {
-    const { eventId, mode = 'balanced' } = req.body;
+    const { eventId, mode = 'balanced', useButtons = false } = req.body;
     if (jobState.isRunning) return res.status(400).json({ error: 'Job already running' });
 
     // 1. Get connected account
@@ -681,7 +553,28 @@ app.post('/api/whatsapp/send-batch', async (req, res) => {
                 const guestName = msg.guests?.name || 'Guest';
 
                 let res;
-                if (msg.image_url) {
+                if (useButtons) {
+                    const endpoint = msg.image_url ? `/message/sendButtonsMedia/${account.id}` : `/message/sendButtons/${account.id}`;
+                    const payload = {
+                        number: jid,
+                        description: msg.message_text,
+                        footer: 'Lony Invitations',
+                        button: [
+                            { buttonId: 'rsvp_accept', buttonText: { displayText: '✅ تأكيد الحضور' }, type: 1 },
+                            { buttonId: 'rsvp_decline', buttonText: { displayText: '❌ اعتذار' }, type: 1 }
+                        ]
+                    };
+
+                    if (msg.image_url) {
+                        payload.mediaMessage = {
+                            mediatype: "image",
+                            media: msg.image_url,
+                            caption: msg.message_text
+                        };
+                    }
+
+                    res = await callEvolution(endpoint, 'POST', payload);
+                } else if (msg.image_url) {
                     res = await callEvolution(`/message/sendMedia/${account.id}`, 'POST', {
                         number: jid,
                         options: { delay: 1000, presence: "composing" },
@@ -742,14 +635,15 @@ app.get(['/api/whatsapp/status', '/api/whatsapp/status/:eventId'], (req, res) =>
     res.json({
         success: true,
         status: {
-            isRunning: jobState.isRunning,
-            isPaused: jobState.isPaused,
-            lastLog: jobState.lastLog,
+            isRunning: !!jobState.isRunning,
+            isPaused: !!jobState.isPaused,
+            lastLog: jobState.lastLog || '',
             stats: {
-                sent: jobState.sent,
-                failed: jobState.failed,
-                pending: jobState.total - jobState.processed,
-                queued: 0
+                sent: jobState.sent || 0,
+                failed: jobState.failed || 0,
+                pending: (jobState.total || 0) - (jobState.processed || 0),
+                total: jobState.total || 0,
+                processed: jobState.processed || 0
             }
         }
     });

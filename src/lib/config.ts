@@ -11,15 +11,12 @@ const getApiUrl = () => {
         return import.meta.env.VITE_WHATSAPP_API_URL;
     }
 
-    // 2. Fallback: Localhost Development
-    // Logic: If running on localhost, assume backend is on port 3001
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return `http://${window.location.hostname}:3001/api/whatsapp`;
-    }
+    // 2. Fallback: Localhost/Network Development
+    // Logic: Use the current window hostname (localhost, 127.0.0.1, or network IP)
+    const host = window.location.hostname || 'localhost';
 
-    // 3. Absolute Fallback (Production but forgot env var?)
-    // This might fail if backend is not on the same domain, but better than crashing
-    return '/api/whatsapp';
+    // In local development, the backend usually lives on port 3001
+    return `http://${host}:3001/api/whatsapp`;
 };
 
 export const config = {

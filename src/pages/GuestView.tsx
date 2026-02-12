@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { CheckCircle, XCircle, Users, Clock, Calendar, Loader2, AlertCircle, Lock, MapPin } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Calendar, Loader2, AlertCircle, Lock, MapPin } from 'lucide-react';
 import { hasFeature, EventFeatures } from '../lib/features';
 
 interface Guest {
@@ -29,6 +29,7 @@ interface Event {
     qr_activation_enabled?: boolean;
     qr_active_from?: string;
     qr_active_until?: string;
+    start_date?: string;
     features?: Partial<EventFeatures>;
 }
 
@@ -218,11 +219,13 @@ export default function GuestView() {
 
     if (!guest || !event) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-orange-100 p-4">
-                <div className="text-center bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-                    <XCircle className="w-24 h-24 text-red-500 mx-auto mb-6" />
-                    <h1 className="text-3xl font-bold text-red-600 mb-3">دعوة غير صالحة</h1>
-                    <p className="text-gray-600 text-lg">عذراً، لم نتمكن من العثور على هذه الدعوة</p>
+            <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]" dir="rtl">
+                <div className="max-w-md w-full text-center bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                    <div className="inline-flex items-center justify-center w-20 h-20 bg-red-500/20 rounded-2xl mb-8">
+                        <XCircle className="w-12 h-12 text-red-500" />
+                    </div>
+                    <h1 className="text-3xl font-bold text-white mb-4">دعوة غير صالحة</h1>
+                    <p className="text-gray-400 text-lg leading-relaxed">عذراً، لم نتمكن من العثور على هذه الدعوة في سجلاتنا.</p>
                 </div>
             </div>
         );
@@ -277,23 +280,20 @@ export default function GuestView() {
         }, [targetDate]);
 
         return (
-            <div className="grid grid-cols-4 gap-3 mb-6">
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white text-center">
-                    <div className="text-3xl font-bold">{timeLeft.days}</div>
-                    <div className="text-xs mt-1">يوم</div>
-                </div>
-                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white text-center">
-                    <div className="text-3xl font-bold">{timeLeft.hours}</div>
-                    <div className="text-xs mt-1">ساعة</div>
-                </div>
-                <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl p-4 text-white text-center">
-                    <div className="text-3xl font-bold">{timeLeft.minutes}</div>
-                    <div className="text-xs mt-1">دقيقة</div>
-                </div>
-                <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-4 text-white text-center">
-                    <div className="text-3xl font-bold">{timeLeft.seconds}</div>
-                    <div className="text-xs mt-1">ثانية</div>
-                </div>
+            <div className="grid grid-cols-4 gap-2 md:gap-4 mb-6">
+                {[
+                    { label: 'يوم', value: timeLeft.days, color: 'from-blue-500/20 to-blue-600/20', border: 'border-blue-500/30' },
+                    { label: 'ساعة', value: timeLeft.hours, color: 'from-purple-500/20 to-purple-600/20', border: 'border-purple-500/30' },
+                    { label: 'دقيقة', value: timeLeft.minutes, color: 'from-pink-500/20 to-pink-600/20', border: 'border-pink-500/30' },
+                    { label: 'ثانية', value: timeLeft.seconds, color: 'from-red-500/20 to-red-600/20', border: 'border-red-500/30' }
+                ].map((item, idx) => (
+                    <div key={idx} className={`bg-gradient-to-br ${item.color} ${item.border} border backdrop-blur-md rounded-2xl p-3 md:p-5 text-center`}>
+                        <div className="text-2xl md:text-3xl font-black text-white tabular-nums drop-shadow-lg">
+                            {String(item.value).padStart(2, '0')}
+                        </div>
+                        <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 mt-1 font-bold">{item.label}</div>
+                    </div>
+                ))}
             </div>
         );
     };
@@ -301,47 +301,71 @@ export default function GuestView() {
     // Show countdown if QR not active yet
     if (qrStatus === 'not_started' && qrActiveFrom) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-100 py-6 px-4" dir="rtl">
-                <div className="max-w-lg mx-auto space-y-4">
-                    <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
-                        <Clock className="w-20 h-20 text-blue-600 mx-auto mb-4" />
-                        <h1 className="text-3xl font-bold text-gray-800 mb-2">الدعوة قيد الانتظار</h1>
-                        <p className="text-gray-600 mb-6">هذه الدعوة ستكون قابلة للاستخدام في:</p>
+            <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] relative overflow-hidden" dir="rtl">
+                {/* Decorative Elements */}
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none"></div>
 
-                        <CountdownTimer targetDate={qrActiveFrom} />
-
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 mb-4 border-2 border-blue-200">
-                            <h2 className="text-2xl font-bold text-gray-800 mb-2">{event.name}</h2>
-                            <div className="flex items-center justify-center gap-2 text-gray-600 mb-2">
-                                <Calendar className="w-5 h-5" />
-                                <span>{event.date}</span>
+                <div className="max-w-xl w-full z-10">
+                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] shadow-2xl p-8 md:p-12 text-center relative">
+                        {/* Premium Header */}
+                        <div className="mb-10">
+                            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-tr from-blue-500 to-purple-600 rounded-2xl shadow-[0_0_30px_rgba(59,130,246,0.5)] mb-6 transform -rotate-3">
+                                <Clock className="w-10 h-10 text-white" />
                             </div>
-                            {event.location && (
-                                <div className="flex items-center justify-center gap-2 text-gray-600">
-                                    <MapPin className="w-5 h-5" />
-                                    <span>{event.location}</span>
+                            <h1 className="text-4xl md:text-5xl font-black mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 leading-tight">
+                                نتشرف بدعوتك
+                            </h1>
+                            <div className="h-1 w-24 bg-gradient-to-r from-blue-500 to-purple-500 mx-auto rounded-full"></div>
+                        </div>
+
+                        {/* Event Details Card */}
+                        <div className="bg-white/5 rounded-3xl p-6 mb-10 border border-white/5 space-y-4">
+                            <h2 className="text-2xl font-bold text-white mb-2">{event.name}</h2>
+
+                            <div className="flex flex-wrap justify-center gap-6 text-gray-300">
+                                <div className="flex items-center gap-2">
+                                    <Calendar className="w-5 h-5 text-blue-400" />
+                                    <span className="text-lg">{event.date}</span>
+                                </div>
+                                {event.location && (
+                                    <div className="flex items-center gap-2">
+                                        <MapPin className="w-5 h-5 text-purple-400" />
+                                        <span className="text-lg">{event.location}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Countdown Section */}
+                        <div className="mb-10">
+                            <p className="text-gray-400 mb-6 uppercase tracking-widest text-sm font-bold">يفتح مسح الباركود خلال</p>
+                            <CountdownTimer targetDate={qrActiveFrom} />
+                        </div>
+
+                        {/* Guest Welcome */}
+                        <div className="border-t border-white/10 pt-8 mb-4">
+                            <p className="text-gray-400 mb-2">أهلاً بك</p>
+                            <h3 className="text-2xl font-bold text-white">{guest.name}</h3>
+                            {guest.table_no && (
+                                <div className="mt-4 inline-flex items-center gap-2 bg-blue-500/20 text-blue-300 px-6 py-2 rounded-full border border-blue-500/20">
+                                    <span className="font-bold">طاولة: {guest.table_no}</span>
                                 </div>
                             )}
                         </div>
 
-                        <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4">
-                            <p className="text-yellow-800 font-semibold">
-                                ⏰ التفعيل: {qrActiveFrom.toLocaleString('ar-SA', {
-                                    year: 'numeric',
-                                    month: 'long',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                })}
-                            </p>
+                        {/* Bottom Info */}
+                        <div className="mt-8 flex items-center justify-center gap-2 text-indigo-400/60 text-sm">
+                            <Lock className="w-4 h-4" />
+                            <span>يتم تأمين الدخول حتى الموعد المحدد</span>
                         </div>
+                    </div>
 
-                        <div className="mt-6 p-4 bg-gray-50 rounded-xl">
-                            <p className="text-sm text-gray-600">مدعو: <span className="font-bold text-gray-800">{guest.name}</span></p>
-                            {guest.table_no && (
-                                <p className="text-sm text-gray-600 mt-1">طاولة: <span className="font-bold text-gray-800">{guest.table_no}</span></p>
-                            )}
-                        </div>
+                    {/* Footer Logo */}
+                    <div className="mt-12 text-center">
+                        <p className="text-gray-500 text-sm tracking-widest uppercase">
+                            بواسطة <span className="text-gray-300 font-bold ml-1 italic">LONY INVITATIONS</span>
+                        </p>
                     </div>
                 </div>
             </div>
@@ -351,15 +375,17 @@ export default function GuestView() {
     // Show expired message if QR expired
     if (qrStatus === 'expired') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-200 p-4">
-                <div className="text-center bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-                    <XCircle className="w-24 h-24 text-gray-500 mx-auto mb-6" />
-                    <h1 className="text-3xl font-bold text-gray-700 mb-3">انتهت صلاحية الدعوة</h1>
-                    <p className="text-gray-600 text-lg mb-4">عذراً، انتهت فترة صلاحية هذه الدعوة</p>
+            <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]" dir="rtl">
+                <div className="max-w-md w-full text-center bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+                    <div className="inline-flex items-center justify-center w-20 h-20 bg-gray-500/20 rounded-2xl mb-8">
+                        <Clock className="w-12 h-12 text-gray-500" />
+                    </div>
+                    <h1 className="text-3xl font-bold text-white mb-4">انتهت الصلاحية</h1>
+                    <p className="text-gray-400 text-lg mb-8">عذراً، انتهت فترة صلاحية هذه الدعوة للحدث التالي:</p>
 
-                    <div className="bg-gray-50 rounded-xl p-4">
-                        <p className="text-sm text-gray-600">الحدث: <span className="font-bold text-gray-800">{event.name}</span></p>
-                        <p className="text-sm text-gray-600 mt-1">التاريخ: <span className="font-bold text-gray-800">{event.date}</span></p>
+                    <div className="bg-white/5 rounded-2xl p-6 border border-white/5">
+                        <h2 className="text-xl font-bold text-white mb-2">{event.name}</h2>
+                        <p className="text-gray-400">{event.date}</p>
                     </div>
                 </div>
             </div>
@@ -370,131 +396,110 @@ export default function GuestView() {
     const totalScanned = scans.length;
     const remaining = Math.max(0, totalAllowed - totalScanned);
     const canCheckIn = remaining > 0;
-    const firstScan = scans.length > 0 ? scans[scans.length - 1] : null;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-100 py-6 px-4" dir="rtl">
-            <div className="max-w-lg mx-auto space-y-4">
-                {/* Event Header */}
-                <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
-                    <Calendar className="w-12 h-12 text-indigo-600 mx-auto mb-3" />
-                    <h2 className="text-2xl font-bold text-gray-800">{event.name}</h2>
-                    <p className="text-gray-600 mt-1">{event.date}</p>
+        <div className="min-h-screen bg-[#0a0a0a] text-white py-10 px-6 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] relative overflow-hidden" dir="rtl">
+            {/* Decorative Backgrounds */}
+            <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[60%] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none"></div>
+            <div className="absolute bottom-[-20%] right-[-20%] w-[60%] h-[60%] bg-purple-600/10 rounded-full blur-[150px] pointer-events-none"></div>
+
+            <div className="max-w-xl mx-auto space-y-8 z-10 relative">
+                {/* Event Header Card */}
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 text-center shadow-2xl">
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-500/10 rounded-2xl mb-4">
+                        <Calendar className="w-8 h-8 text-blue-400" />
+                    </div>
+                    <h2 className="text-3xl font-black text-white mb-2">{event.name}</h2>
+                    <div className="flex items-center justify-center gap-2 text-gray-400">
+                        <Clock className="w-5 h-5" />
+                        <span>{event.date}</span>
+                    </div>
                 </div>
 
-                {/* Guest Info Card */}
-                <div className="bg-white rounded-2xl shadow-xl p-6">
-                    <div className="text-center mb-6">
-                        <div className={`w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg ${canCheckIn ? 'bg-gradient-to-br from-green-400 to-green-600' : 'bg-gradient-to-br from-gray-400 to-gray-600'
+                {/* Digital QR Card */}
+                <div className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[3rem] p-8 md:p-12 shadow-2xl overflow-hidden relative group">
+                    {/* Status Badge */}
+                    <div className="flex justify-center mb-8">
+                        <div className={`px-6 py-2 rounded-full font-black text-sm uppercase tracking-widest border transition-all duration-500 ${canCheckIn
+                            ? 'bg-green-500/10 text-green-400 border-green-500/20 shadow-[0_0_20px_rgba(34,197,94,0.2)]'
+                            : 'bg-red-500/10 text-red-400 border-red-500/20 shadow-[0_0_20px_rgba(239,68,68,0.2)]'
                             }`}>
-                            {canCheckIn ? (
-                                <CheckCircle className="w-10 h-10 text-white" />
-                            ) : (
-                                <XCircle className="w-10 h-10 text-white" />
-                            )}
+                            {canCheckIn ? 'تذكرة صالحة' : 'تم استهلاك التذكرة'}
                         </div>
-                        <h1 className="text-3xl font-bold text-gray-800 mb-2">{guest.name}</h1>
+                    </div>
+
+                    <div className="text-center mb-10">
+                        <h1 className="text-4xl font-black text-white mb-2 tracking-tight">{guest.name}</h1>
+                        <p className="text-gray-400 text-lg">يسعدنا حضورك</p>
+                    </div>
+
+                    <div className="relative mb-10 flex justify-center">
+                        <div className="absolute inset-0 bg-blue-500/20 blur-[60px] rounded-full opacity-50 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="relative bg-white p-6 rounded-[2.5rem] shadow-[0_0_50px_rgba(255,255,255,0.1)] transition-transform hover:scale-105 duration-500">
+                            <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${guest.qr_token}&bgcolor=ffffff&color=000000&margin=10`}
+                                alt="QR Code"
+                                className="w-48 h-48 md:w-56 md:h-56 mix-blend-multiply"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Details Grid */}
+                    <div className="grid grid-cols-2 gap-4 mb-8">
                         {guest.table_no && (
-                            <div className="inline-block bg-indigo-100 text-indigo-800 px-4 py-2 rounded-full font-bold text-lg">
-                                طاولة {guest.table_no}
+                            <div className="bg-white/5 rounded-2xl p-4 border border-white/5 text-center">
+                                <p className="text-gray-500 text-xs mb-1 uppercase font-bold tracking-tighter">رقم الطاولة</p>
+                                <p className="text-2xl font-black text-white">{guest.table_no}</p>
                             </div>
                         )}
+                        <div className="bg-white/5 rounded-2xl p-4 border border-white/5 text-center col-span-1">
+                            <p className="text-gray-500 text-xs mb-1 uppercase font-bold tracking-tighter">المرافقين</p>
+                            <p className="text-2xl font-black text-white">{guest.companions_count || 0}</p>
+                        </div>
                     </div>
 
-                    {/* Companions Info */}
-                    {guest.companions_count && guest.companions_count > 0 && (
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 mb-4 border-2 border-indigo-200">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <Users className="w-6 h-6 text-indigo-600" />
-                                    <div>
-                                        <div className="text-sm text-gray-600">عدد المرافقين</div>
-                                        <div className="font-bold text-gray-800 text-2xl">{guest.companions_count}</div>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <div className="text-sm text-gray-600">الإجمالي المسموح</div>
-                                    <div className="font-bold text-indigo-600 text-2xl">{totalAllowed}</div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Scan Status */}
-                    <div className={`rounded-xl p-5 mb-4 border-2 ${canCheckIn
-                        ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300'
-                        : 'bg-gradient-to-r from-red-50 to-orange-50 border-red-300'
+                    {/* Scan Progress */}
+                    <div className={`rounded-3xl p-6 border transition-all ${canCheckIn
+                        ? 'bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-green-500/20'
+                        : 'bg-gradient-to-br from-red-500/10 to-orange-500/10 border-red-500/20'
                         }`}>
-                        <div className="flex items-center justify-between mb-3">
-                            <div>
-                                <div className="text-sm text-gray-600">تم المسح</div>
-                                <div className="font-bold text-3xl text-gray-800">{totalScanned}</div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-sm text-gray-600">المتبقي</div>
-                                <div className={`font-bold text-3xl ${canCheckIn ? 'text-green-600' : 'text-red-600'}`}>
-                                    {remaining}
-                                </div>
-                            </div>
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-gray-400 text-sm font-bold">حالة الدخول</p>
+                            <p className="text-white font-black">{totalScanned} / {totalAllowed}</p>
                         </div>
-
-                        {canCheckIn ? (
-                            <div className="flex items-center gap-2 text-green-700">
-                                <CheckCircle className="w-5 h-5" />
-                                <span className="font-semibold">يمكن تسجيل الدخول ({remaining} مرة متبقية)</span>
-                            </div>
-                        ) : (
-                            <div className="flex items-center gap-2 text-red-700">
-                                <AlertCircle className="w-5 h-5" />
-                                <span className="font-semibold">تم استنفاد جميع المحاولات</span>
-                            </div>
-                        )}
+                        <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                            <div
+                                className={`h-full transition-all duration-1000 ease-out ${canCheckIn ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 'bg-red-500'}`}
+                                style={{ width: `${(totalScanned / totalAllowed) * 100}%` }}
+                            ></div>
+                        </div>
                     </div>
-
-
                 </div>
 
-                {/* Scan History */}
+                {/* Scan History - Elegant List */}
                 {scans.length > 0 && (
-                    <div className="bg-white rounded-2xl shadow-xl p-6">
-                        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                            <Clock className="w-6 h-6 text-indigo-600" />
-                            سجل الدخول
+                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
+                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                            <Clock className="w-6 h-6 text-blue-400" />
+                            سجل الحضور
                         </h3>
-                        <div className="space-y-3">
-                            {scans.map((scan, index) => {
-                                const scanDate = new Date(scan.scanned_at);
-                                const isFirst = index === scans.length - 1;
-
+                        <div className="space-y-4">
+                            {scans.slice(0, 5).map((scan, idx) => {
+                                const d = new Date(scan.scanned_at);
                                 return (
-                                    <div
-                                        key={scan.id}
-                                        className={`p-4 rounded-xl border-2 ${isFirst
-                                            ? 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-300'
-                                            : 'bg-gray-50 border-gray-200'
-                                            }`}
-                                    >
-                                        <div className="flex items-center justify-between">
+                                    <div key={scan.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:bg-white/10 transition-colors">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold">
+                                                {scans.length - idx}
+                                            </div>
                                             <div>
-                                                <div className="font-bold text-gray-800">
-                                                    {isFirst ? '🎉 الدخول الأول' : `الدخول رقم ${scans.length - index}`}
-                                                </div>
-                                                <div className="text-sm text-gray-600 mt-1">
-                                                    {scanDate.toLocaleDateString('ar-SA', {
-                                                        year: 'numeric',
-                                                        month: 'long',
-                                                        day: 'numeric'
-                                                    })}
-                                                </div>
+                                                <p className="font-bold text-white">دخول معتمد</p>
+                                                <p className="text-xs text-gray-500 italic">بواسطة المضيف</p>
                                             </div>
-                                            <div className="text-right">
-                                                <div className="font-bold text-indigo-600 text-lg">
-                                                    {scanDate.toLocaleTimeString('ar-SA', {
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
-                                                </div>
-                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-white font-bold">{d.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</p>
+                                            <p className="text-[10px] text-gray-500">{d.toLocaleDateString('ar-SA')}</p>
                                         </div>
                                     </div>
                                 );
@@ -504,24 +509,22 @@ export default function GuestView() {
                 )}
 
                 {/* Footer */}
-                <div className="text-center py-4 text-gray-500 text-sm">
-                    <p>Powered by <span className="font-bold text-indigo-600">Lony Invitations</span></p>
+                <div className="text-center py-8 opacity-40">
+                    <div className="h-[1px] w-20 bg-gray-500 mx-auto mb-6"></div>
+                    <p className="text-[10px] tracking-[0.2em] font-black uppercase">Official Guest Portal • Lony Platform</p>
                 </div>
             </div>
 
-            {/* SECURITY OVERLAY: If Inspector App Required, show floating alert that this view is Read-Only */}
+            {/* SECURITY OVERLAY */}
             {event && hasFeature(event, 'require_inspector_app') && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md p-4 border-t border-gray-200 shadow-[0_-5px_20px_rgba(0,0,0,0.1)] z-50 animate-in slide-in-from-bottom">
-                    <div className="max-w-md mx-auto flex items-center gap-4">
-                        <div className="bg-orange-100 p-2 rounded-full">
-                            <Lock className="w-6 h-6 text-orange-600" />
+                <div className="fixed bottom-6 left-6 right-6 z-50 animate-in slide-in-from-bottom-10 duration-700">
+                    <div className="bg-orange-500/10 backdrop-blur-2xl border border-orange-500/20 p-6 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center gap-6">
+                        <div className="bg-orange-500 p-4 rounded-2xl shadow-lg shadow-orange-500/20">
+                            <Lock className="w-8 h-8 text-white" />
                         </div>
-                        <div className="flex-1">
-                            <h4 className="font-bold text-gray-800 text-sm">وضع الأمان مفعل</h4>
-                            <p className="text-xs text-gray-600">
-                                لا يمكن استخدام هذا الرابط للدخول. يجب مسح الرمز من خلال
-                                <span className="font-bold text-indigo-600 mx-1">تطبيق المشرفين</span>.
-                            </p>
+                        <div>
+                            <h4 className="font-black text-white text-lg">وضع الأمان مفعل</h4>
+                            <p className="text-sm text-gray-400 leading-snug">صلاحية الدخول تمنح فقط عبر مسح الرمز من خلال تطبيق المنظمين الرسمي.</p>
                         </div>
                     </div>
                 </div>

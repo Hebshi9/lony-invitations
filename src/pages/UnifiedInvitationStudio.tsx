@@ -938,8 +938,8 @@ function UnifiedInvitationStudioContent() {
                     // LINKING QR TO NETLIFY
                     // Use custom URL pattern or default
                     // Build verify URL
-                    // USE /v/ ROUTE: This leads to the Luxury Preview (Dark Matter) with Countdown & Statuses
-                    const defaultUrl = 'https://lonyinvite.netlify.app/v/{token}';
+                    // USE OFFICIAL STATIC CHECK-IN PAGE: This has the specific countdown and states agreed on.
+                    const defaultUrl = 'https://lonyinvite.netlify.app/check-in.html?token={token}';
                     const baseUrl = (el as any).qrUrl && (el as any).qrUrl.trim() ? (el as any).qrUrl : defaultUrl;
                     const qrContent = baseUrl.replace('{token}', targetGuest.qr_token || targetGuest.id || '');
 

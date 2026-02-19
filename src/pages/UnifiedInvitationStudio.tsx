@@ -1178,6 +1178,14 @@ function UnifiedInvitationStudioContent() {
                         <hr className="my-2" />
                         <div className="space-y-2">
                             <Button
+                                onClick={() => setShowBulkAddDialog(true)}
+                                variant="outline"
+                                className="w-full text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 font-bold h-11"
+                            >
+                                <Sparkles className="w-4 h-4 ml-2" /> إنشاء ضيوف مرقمين (ترقيم تلقائي)
+                            </Button>
+
+                            <Button
                                 onClick={generateAllCards}
                                 disabled={!selectedEventId || generating || guests.length === 0}
                                 className={`w-full text-white ${generating ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}

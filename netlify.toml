@@ -6,6 +6,13 @@
   command = "npm run dev"
   port = 5173
 
+# Serve check-in.html as a standalone static file (not through React SPA)
+[[redirects]]
+  from = "/check-in.html"
+  to = "/check-in.html"
+  status = 200
+
+# SPA fallback for all other routes
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -252,9 +252,18 @@
         const urlParams = new URLSearchParams(window.location.search);
         const qrToken = urlParams.get('token');
 
+        // Debug log helper
+        function debugLog(msg) {
+            console.log('[CHECK-IN DEBUG]', msg);
+            const d = document.getElementById('debug-panel');
+            if (d) d.innerHTML += msg + '<br>';
+        }
+
         async function apiCall(endpoint, options = {}) {
             try {
-                const response = await fetch(`${API_URL}${endpoint}`, {
+                const url = `${API_URL}${endpoint}`;
+                debugLog('📡 Fetching: ' + url);
+                const response = await fetch(url, {
                     ...options,
                     headers: {
                         'apikey': API_KEY,
@@ -264,15 +273,30 @@
                         ...options.headers
                     }
                 });
-                if (!response.ok) throw new Error(`API Error: ${response.status}`);
-                return response.json();
+                debugLog('📥 Status: ' + response.status);
+                if (!response.ok) {
+                    const errText = await response.text();
+                    debugLog('❌ Error body: ' + errText);
+                    throw new Error(`API Error: ${response.status} - ${errText}`);
+                }
+                const data = await response.json();
+                debugLog('✅ Data count: ' + (Array.isArray(data) ? data.length : 'object'));
+                return data;
             } catch (error) {
+                debugLog('🔥 Exception: ' + error.message);
                 console.error(error);
                 throw error;
             }
         }
 
         async function init() {
+            // Add debug panel
+            const dp = document.createElement('div');
+            dp.id = 'debug-panel';
+            dp.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:10px;max-height:200px;overflow:auto;font-family:monospace;z-index:9999;direction:ltr;text-align:left';
+            document.body.appendChild(dp);
+            debugLog('🚀 Init started. Token: ' + qrToken);
+
             // ─── TEST MODE HANDLING ───
             const testMode = urlParams.get('_test_mode');
             if (testMode) {
@@ -301,6 +325,7 @@
 
             try {
                 const guests = await apiCall(`/guests?qr_token=eq.${qrToken}&select=*,events(*)`);
+                debugLog('📋 Guests result: ' + JSON.stringify(guests?.length));
                 if (!guests || guests.length === 0) return showError('دعوة غير صالحة', 'عذراً، لم نتمكن من العثور على هذه الدعوة');
 
                 const guest = guests[0];

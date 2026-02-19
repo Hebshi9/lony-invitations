@@ -938,8 +938,8 @@ function UnifiedInvitationStudioContent() {
                     // LINKING QR TO NETLIFY
                     // Use custom URL pattern or default
                     // Build verify URL
-                    // User requested to keep pointing to Netlify even on localhost for production-ready QR codes
-                    const defaultUrl = 'https://lonyinvite.netlify.app/verify/{token}';
+                    // USE /v/ ROUTE: This leads to the Luxury Preview (Dark Matter) with Countdown & Statuses
+                    const defaultUrl = 'https://lonyinvite.netlify.app/v/{token}';
                     const baseUrl = (el as any).qrUrl && (el as any).qrUrl.trim() ? (el as any).qrUrl : defaultUrl;
                     const qrContent = baseUrl.replace('{token}', targetGuest.qr_token || targetGuest.id || '');
 

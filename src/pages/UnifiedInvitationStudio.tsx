@@ -120,6 +120,11 @@ function UnifiedInvitationStudioContent() {
     const [customPrompt, setCustomPrompt] = useState('');
     const [isListening, setIsListening] = useState(false);
     const [previewImages, setPreviewImages] = useState<string[]>([]);
+    const [showBulkAddDialog, setShowBulkAddDialog] = useState(false);
+    const [bulkAddCount, setBulkAddCount] = useState(50);
+    const [bulkPrefix, setBulkPrefix] = useState('');
+    const [bulkStart, setBulkStart] = useState(1);
+    const [bulkPadding, setBulkPadding] = useState(3);
 
 
     // Refs
@@ -1389,14 +1394,16 @@ function UnifiedInvitationStudioContent() {
                                                     <div className="flex justify-between items-end mb-1.5">
                                                         <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">المحتوى المتغير</label>
                                                         <select
-                                                            className="text-[10px] border border-amber-200 rounded-md bg-amber-50 text-amber-800 px-2 py-0.5 outline-none cursor-pointer hover:bg-amber-100 transition-colors"
+                                                            className="text-[10px] border border-amber-200 rounded-md bg-amber-50 text-amber-800 px-2 py-1 outline-none cursor-pointer hover:bg-amber-100 transition-colors font-bold"
                                                             onChange={(e) => {
                                                                 if (e.target.value) updateElement('text', (selectedElement.text || '') + ` {${e.target.value}}`);
                                                             }}
                                                             value=""
                                                         >
-                                                            <option value="">+ إدراج حقل</option>
-                                                            {availableFields.map(f => <option key={f} value={f}>{f}</option>)}
+                                                            <option value="">+ إدراج حقل (مثل الاسم أو الرقم)</option>
+                                                            {['name', 'table', 'category', 'serial', 'companions_count'].map(f => (
+                                                                <option key={f} value={f}>{f === 'serial' ? 'الرقم التسلسلي {serial}' : f}</option>
+                                                            ))}
                                                         </select>
                                                     </div>
                                                     <textarea
@@ -1826,6 +1833,123 @@ function UnifiedInvitationStudioContent() {
                     </div>
                 )
             }
+            {/* Bulk Add Dialog */}
+            {showBulkAddDialog && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                    <Card className="w-full max-w-md animate-in zoom-in-95 duration-200 border border-purple-100 shadow-2xl">
+                        <CardHeader className="bg-purple-50/50">
+                            <CardTitle className="flex items-center gap-2 text-purple-900">
+                                <Sparkles className="w-5 h-5 text-purple-600" />
+                                إنشاء كروت مرقمة (تلقائي)
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4 pt-6">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">كم عدد الكروت التي تريد إنشاءها؟</label>
+                                <input
+                                    type="number"
+                                    value={bulkAddCount}
+                                    onChange={(e) => setBulkAddCount(parseInt(e.target.value) || 1)}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-100 focus:border-purple-400 outline-none transition-all text-center text-xl font-bold"
+                                />
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">بادئة (Prefix)</label>
+                                    <input
+                                        type="text"
+                                        value={bulkPrefix}
+                                        onChange={(e) => setBulkPrefix(e.target.value)}
+                                        placeholder="مثلاً: INV-"
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-center font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">بدءاً من</label>
+                                    <input
+                                        type="number"
+                                        value={bulkStart}
+                                        onChange={(e) => setBulkStart(parseInt(e.target.value) || 1)}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-center font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">تصفير (000)</label>
+                                    <input
+                                        type="number"
+                                        value={bulkPadding}
+                                        min="1"
+                                        max="6"
+                                        value={bulkPadding}
+                                        onChange={(e) => setBulkPadding(parseInt(e.target.value) || 1)}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-center font-mono"
+                                    />
+                                </div>
+                            </div>
+                            <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 text-xs text-purple-800 leading-relaxed shadow-sm">
+                                <div className="font-bold mb-1 flex items-center gap-1">
+                                    <Info className="w-3 h-3" /> معاينة التنسيق:
+                                </div>
+                                سيتم إنشاء {bulkAddCount} كرت. الأول سيكون:
+                                <span className="font-mono bg-white px-2 py-0.5 rounded mx-1 font-bold border border-purple-200">
+                                    {bulkPrefix}{String(bulkStart).padStart(bulkPadding, '0')}
+                                </span>
+                            </div>
+                            <div className="flex gap-3 mt-8">
+                                <Button
+                                    variant="ghost"
+                                    className="flex-1 h-12 rounded-xl text-gray-500 hover:bg-gray-100"
+                                    onClick={() => setShowBulkAddDialog(false)}
+                                >
+                                    إلغاء
+                                </Button>
+                                <Button
+                                    className="flex-1 h-12 bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-lg shadow-purple-200 font-bold"
+                                    disabled={saving}
+                                    onClick={async () => {
+                                        if (!selectedEventId) return;
+                                        setSaving(true);
+                                        try {
+                                            const newBatch = Array.from({ length: bulkAddCount }).map((_, i) => {
+                                                const num = bulkStart + i;
+                                                const serial = `${bulkPrefix}${String(num).padStart(bulkPadding, '0')}`;
+                                                return {
+                                                    id: uuidv4(),
+                                                    event_id: selectedEventId,
+                                                    name: `بطاقة رقم ${serial}`,
+                                                    card_number: serial,
+                                                    status: 'confirmed',
+                                                    qr_token: uuidv4(),
+                                                    qr_payload: uuidv4(),
+                                                    companions_count: 0
+                                                };
+                                            });
+
+                                            const { error } = await supabase.from('guests').insert(newBatch);
+                                            if (error) throw error;
+
+                                            setShowBulkAddDialog(false);
+                                            // Trigger refresh via setGuests if local or re-fetch
+                                            if (typeof handleEventSelect === 'function') {
+                                                handleEventSelect(selectedEventId);
+                                            } else {
+                                                window.location.reload();
+                                            }
+                                        } catch (err: any) {
+                                            alert("حدث خطأ أثناء الإنشاء: " + err.message);
+                                        } finally {
+                                            setSaving(true); // Keep spinner while reloading
+                                            setTimeout(() => setSaving(false), 2000);
+                                        }
+                                    }}
+                                >
+                                    {saving ? <RefreshCw className="animate-spin" /> : 'إنشاء البطاقات الآن'}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
         </div >
     );
 }

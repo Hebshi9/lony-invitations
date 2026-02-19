@@ -36,6 +36,13 @@ const UploadGuests: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Auto-Numbering State
+    const [enableAutoNumbering, setEnableAutoNumbering] = useState(false);
+    const [serialPrefix, setSerialPrefix] = useState('');
+    const [serialStart, setSerialStart] = useState(1);
+    const [serialPadding, setSerialPadding] = useState(3);
+    const [blankCardCount, setBlankCardCount] = useState(10);
+
     useEffect(() => {
         fetchEvents();
     }, []);
@@ -121,27 +128,50 @@ const UploadGuests: React.FC = () => {
         }
     };
 
+    const handleGenerateBlankCards = () => {
+        const dummyGuests = Array.from({ length: blankCardCount }).map((_, i) => ({
+            name: '',
+            phone: '',
+            table_no: '',
+            companions_count: 0,
+            category: 'عادي'
+        }));
+        setEnableAutoNumbering(true);
+        setParsedGuests(dummyGuests);
+        setValidationResult({ errors: [], valid: dummyGuests });
+        setStep('review');
+    };
+
     const handleConfirmImport = async () => {
         if (!selectedEvent || parsedGuests.length === 0) return;
 
         setLoading(true);
         try {
             // Prepare guests for insertion
-            const guestsToInsert = parsedGuests.map(guest => ({
-                id: uuidv4(),
-                event_id: selectedEvent,
-                name: guest.name,
-                phone: guest.phone || null,
-                table_no: guest.table_no || null,
-                companions_count: guest.companions_count || 0,
-                remaining_companions: guest.companions_count || 0,
-                category: guest.category || 'عادي',
-                card_number: guest.card_number || null, // Map card number
-                status: 'pending',
-                qr_token: uuidv4(), // CRITICAL: Generate the token for the link
-                qr_payload: uuidv4(),
-                card_generated: false
-            }));
+            const guestsToInsert = parsedGuests.map((guest, index) => {
+                let cardNumber = guest.card_number || null;
+
+                if (enableAutoNumbering) {
+                    const num = serialStart + index;
+                    cardNumber = `${serialPrefix}${String(num).padStart(serialPadding, '0')}`;
+                }
+
+                return {
+                    id: uuidv4(),
+                    event_id: selectedEvent,
+                    name: guest.name || (enableAutoNumbering ? `بطاقة رقم ${cardNumber}` : 'ضيف بدون اسم'),
+                    phone: guest.phone || null,
+                    table_no: guest.table_no || null,
+                    companions_count: guest.companions_count || 0,
+                    remaining_companions: guest.companions_count || 0,
+                    category: guest.category || 'عادي',
+                    card_number: cardNumber,
+                    status: 'pending',
+                    qr_token: uuidv4(),
+                    qr_payload: uuidv4(),
+                    card_generated: false
+                };
+            });
 
             // Insert into database
             const { error: insertError } = await supabase
@@ -255,6 +285,34 @@ const UploadGuests: React.FC = () => {
                                         </p>
                                     </div>
                                 </label>
+                            </div>
+
+                            {/* Quick Generate Blank Cards */}
+                            <div className="bg-orange-50 rounded-lg p-6 border border-orange-200">
+                                <h4 className="font-bold text-orange-900 mb-2 flex items-center gap-2">
+                                    <Sparkles className="w-5 h-5" />
+                                    هل تريد كروت مرقمة بدون أسماء؟
+                                </h4>
+                                <p className="text-sm text-orange-800 mb-4">
+                                    يمكنك إنشاء كمية من الكروت المرقمة مباشرة (مثلاً: بطاقة 001، بطاقة 002...)
+                                </p>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1">
+                                        <label className="block text-xs text-orange-700 mb-1 font-bold">عدد الكروت المطلوب</label>
+                                        <input
+                                            type="number"
+                                            value={blankCardCount}
+                                            onChange={(e) => setBlankCardCount(parseInt(e.target.value) || 1)}
+                                            className="w-full px-4 py-2 border border-orange-200 rounded-lg text-sm"
+                                        />
+                                    </div>
+                                    <Button
+                                        onClick={handleGenerateBlankCards}
+                                        className="mt-5 bg-orange-600 hover:bg-orange-700 text-white"
+                                    >
+                                        إنشاء كروت مرقمة
+                                    </Button>
+                                </div>
                             </div>
 
                             {loading && (
@@ -405,6 +463,63 @@ const UploadGuests: React.FC = () => {
                             </p>
                         </CardHeader>
                         <CardContent className="space-y-6">
+                            {/* Auto Numbering Settings */}
+                            <div className="bg-purple-50 border border-purple-200 rounded-xl p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-purple-600" />
+                                        <h4 className="font-bold text-purple-900">إضافة ترقيم تلقائي (Serial Numbering)</h4>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only peer"
+                                            checked={enableAutoNumbering}
+                                            onChange={(e) => setEnableAutoNumbering(e.target.checked)}
+                                        />
+                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                    </label>
+                                </div>
+
+                                {enableAutoNumbering && (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-2">
+                                        <div>
+                                            <label className="block text-xs text-purple-700 mb-1 font-bold">بادئة (Prefix)</label>
+                                            <input
+                                                type="text"
+                                                value={serialPrefix}
+                                                onChange={(e) => setSerialPrefix(e.target.value)}
+                                                placeholder="مثلاً: INV-"
+                                                className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-purple-700 mb-1 font-bold">بداية الترقيم</label>
+                                            <input
+                                                type="number"
+                                                value={serialStart}
+                                                onChange={(e) => setSerialStart(parseInt(e.target.value) || 1)}
+                                                className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-purple-700 mb-1 font-bold">خانة التصفير</label>
+                                            <input
+                                                type="number"
+                                                value={serialPadding}
+                                                onChange={(e) => setSerialPadding(parseInt(e.target.value) || 1)}
+                                                className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-3">
+                                            <p className="text-xs text-purple-600 italic">
+                                                مثال: {serialPrefix}{String(serialStart).padStart(serialPadding, '0')}، {serialPrefix}{String(serialStart + 1).padStart(serialPadding, '0')}...
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Errors */}
                             {validationResult.errors.length > 0 && (
                                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-60 overflow-y-auto">

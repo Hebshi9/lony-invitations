@@ -359,6 +359,21 @@ function UnifiedInvitationStudioContent() {
         setSelectedId(id);
     };
 
+    const addQRCode = () => {
+        const id = Date.now().toString();
+        // DEFAULT TO NETLIFY URL EVEN ON LOCALHOST
+        const defaultNetlifyUrl = 'https://lonyinvite.netlify.app/check-in.html?token={token}';
+        setElements([...elements, {
+            id,
+            type: 'qr',
+            x: CANVAS_WIDTH / 2,
+            y: CANVAS_HEIGHT / 2,
+            size: 250,
+            qrUrl: defaultNetlifyUrl
+        }]);
+        setSelectedId(id);
+    };
+
     const updateElement = (key: keyof DesignElement, value: any) => {
         setElements(prev => prev.map(el => el.id === selectedId ? { ...el, [key]: value } : el));
     };
@@ -1140,13 +1155,18 @@ function UnifiedInvitationStudioContent() {
                     </CardHeader>
                     <CardContent className="space-y-3 pb-4">
                         <div className="grid grid-cols-2 gap-2">
-                            <Button onClick={addText} variant="outline" className="text-xs">
-                                <Type className="w-3 h-3 ml-1" /> إضافة نص
+                            <Button onClick={addText} variant="outline" className="text-xs h-10 border-amber-200 bg-amber-50/30 hover:bg-amber-50">
+                                <Type className="w-3.5 h-3.5 ml-1.5 text-amber-600" /> إضافة نص
                             </Button>
+                            <Button onClick={addQRCode} variant="outline" className="text-xs h-10 border-purple-200 bg-purple-50/30 hover:bg-purple-50">
+                                <QrCodeIcon className="w-3.5 h-3.5 ml-1.5 text-purple-600" /> إضافة باركود
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2">
                             <div className="relative">
                                 <input type="file" onChange={handleBackgroundUpload} className="hidden" id="bg-upload" />
-                                <Button variant="outline" className="w-full text-xs text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100" onClick={() => document.getElementById('bg-upload')?.click()}>
-                                    <ImageIcon className="w-3 h-3 ml-1" /> رفع خلفية
+                                <Button variant="outline" className="w-full text-xs text-blue-600 border-blue-200 bg-blue-50/50 hover:bg-blue-100 h-10" onClick={() => document.getElementById('bg-upload')?.click()}>
+                                    <ImageIcon className="w-3.5 h-3.5 ml-1.5" /> تغيير خلفية الكرت
                                 </Button>
                             </div>
                         </div>

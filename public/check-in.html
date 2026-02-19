@@ -291,6 +291,10 @@
                     showSuccess(mockGuest, mockEvent, [{ scanned_at: new Date().toISOString() }]);
                     return;
                 }
+                if (testMode === 'duplicated') {
+                    showAlreadyScanned(mockGuest, mockEvent, [{ scanned_at: new Date(Date.now() - 3600000).toISOString() }]);
+                    return;
+                }
             }
 
             if (!qrToken) return showError('رابط غير صالح', 'لم يتم العثور على رمز الدعوة');

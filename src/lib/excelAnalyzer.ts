@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 export interface ColumnAnalysis {
     columnIndex: number;
     columnName: string;
-    detectedType: 'name' | 'phone' | 'table' | 'companions' | 'category' | 'unknown';
+    detectedType: 'name' | 'phone' | 'table' | 'companions' | 'category' | 'card_number' | 'unknown';
     confidence: number;
     samples: string[];
 }
@@ -140,6 +140,16 @@ function detectColumnType(header: string, samples: string[]): {
                 return /^(VIP|vip|عادي|normal|premium|بريميوم|عام|general)/i.test(val);
             },
             weight: 0.6
+        },
+        card_number: {
+            headerPatterns: [
+                /رقم البطاقة|تسلسل|سيريال|Card Number|Serial|Sequence|No\.|Num/i
+            ],
+            dataValidation: (val: string) => {
+                // Numeric or alphanumeric, short (e.g. 001, A-01)
+                return /^[a-zA-Z0-9\-]{1,10}$/.test(val);
+            },
+            weight: 0.8
         }
     };
 

@@ -1,6 +1,5 @@
 
-import pkg from '@whiskeysockets/baileys';
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = pkg;
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
@@ -42,21 +41,26 @@ class BaileysService {
         const authPath = `${this.authFolders}/${accountId}`;
         console.log(`[Baileys] Auth path: ${authPath}`);
 
-        const { state, saveCreds } = await useMultiFileAuthState(authPath);
-        const { version } = await fetchLatestBaileysVersion();
-        console.log(`[Baileys] Using Baileys version: ${version}`);
+        try {
+            const { state, saveCreds } = await useMultiFileAuthState(authPath);
+            const { version } = await fetchLatestBaileysVersion();
+            console.log(`[Baileys] Using Baileys version: ${version}`);
 
-        const sock = makeWASocket({
-            version,
-            logger: pino({ level: 'silent' }), // Hide verbose logs
-            printQRInTerminal: false,
-            auth: state,
-            browser: ["Lony Invitations", "Chrome", "1.0.0"], // Simulates a desktop connection
-            connectTimeoutMs: 60000,
-        });
+            const sock = makeWASocket({
+                version,
+                logger: pino({ level: 'silent' }), // Hide verbose logs
+                printQRInTerminal: false,
+                auth: state,
+                browser: ["Lony Invitations", "Chrome", "1.0.0"], // Simulates a desktop connection
+                connectTimeoutMs: 60000,
+            });
 
-        this.clients.set(accountId, sock);
-        console.log(`[Baileys] Socket created and registered for ${accountId}`);
+            this.clients.set(accountId, sock);
+            console.log(`[Baileys] Socket created and registered for ${accountId}`);
+        } catch (initErr) {
+            console.error(`[Baileys] ❌ CRASH during makeWASocket for ${accountId}:`, initErr);
+            throw initErr;
+        }
 
         // Connection Update Handler
         sock.ev.on('connection.update', async (update) => {

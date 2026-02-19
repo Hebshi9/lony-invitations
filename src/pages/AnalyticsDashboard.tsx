@@ -50,11 +50,11 @@ const AnalyticsDashboard: React.FC = () => {
             // 1. Guests Stats
             const { data: guests } = await supabase
                 .from('guests')
-                .select('status, card_generated')
+                .select('status, rsvp_status, card_generated')
                 .eq('event_id', selectedEventId);
 
             const total = guests?.length || 0;
-            const cofirmedCount = guests?.filter(g => g.status === 'confirmed').length || 0;
+            const confirmedCount = guests?.filter(g => g.rsvp_status === 'confirmed').length || 0;
             const generatedCount = guests?.filter(g => g.card_generated).length || 0;
 
             // 2. Scans
@@ -63,19 +63,16 @@ const AnalyticsDashboard: React.FC = () => {
                 .select('*', { count: 'exact', head: true })
                 .eq('event_id', selectedEventId);
 
-            // 3. WhatsApp Messages (Assuming we log them in whatsapp_messages linked to event indirectly or just count sent guests)
-            // For now, let's assume 'status=sent' in guests table implies whatsapp sent if we update it there, 
-            // OR query whatsapp_messages table.
-            // Let's query checks on guests table for now as it's cleaner if we updated it.
-            // Actually, let's check whatsapp_messages table if possible.
-            // But for simplicity, let's use guest status or card_generated as proxy for "Invited" for now.
+            // 3. WhatsApp Sent (Actual check on guests table if we have a field, 
+            // otherwise use a proxy but label it correctly)
+            const invitedCount = guests?.filter(g => g.status === 'ready_to_send' || g.status === 'sent').length || 0;
 
             setStats({
                 totalGuests: total,
-                totalInvited: generatedCount, // Proxy for invited
-                confirmed: cofirmedCount,
+                totalInvited: generatedCount,
+                confirmed: confirmedCount,
                 scanned: scanCount || 0,
-                whatsappSent: generatedCount // Approx
+                whatsappSent: invitedCount
             });
 
         } catch (error) {
@@ -222,7 +219,7 @@ const AnalyticsDashboard: React.FC = () => {
                 'رقم الطاولة': g.table_no,
                 'الفئة': g.category,
                 'عدد المرافقين': g.companions_count,
-                'الحالة (RSVP)': g.status === 'confirmed' ? 'حاضر' : g.status === 'declined' ? 'عتذر' : 'معلق',
+                'الحالة (RSVP)': g.rsvp_status === 'confirmed' ? 'حاضر' : g.rsvp_status === 'declined' ? 'معتذر' : 'معلق',
                 'تم توليد الكرت': g.card_generated ? 'نعم' : 'لا',
                 'رقم الكرت': g.card_number,
                 'تاريخ التوليد': g.card_generated_at ? new Date(g.card_generated_at).toLocaleDateString('ar-SA') : '-',

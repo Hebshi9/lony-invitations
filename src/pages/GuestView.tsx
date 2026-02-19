@@ -1,8 +1,16 @@
 import { useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { CheckCircle, XCircle, Clock, Calendar, Loader2, AlertCircle, Lock, MapPin } from 'lucide-react';
+import { XCircle, Clock, Calendar, Loader2, MapPin, Lock as LockIcon } from 'lucide-react';
 import { hasFeature, EventFeatures } from '../lib/features';
+
+// Helper to parse date strings safely for Hijri conversion
+const getSafeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return null;
+    // If it's just a date YYYY-MM-DD, add noon to prevent UTC shifting day
+    if (dateStr.length === 10) return new Date(`${dateStr}T12:00:00`);
+    return new Date(dateStr);
+};
 
 interface Guest {
     id: string;
@@ -46,7 +54,6 @@ export default function GuestView() {
     const [event, setEvent] = useState<Event | null>(null);
     const [loading, setLoading] = useState(true);
     const [scans, setScans] = useState<Scan[]>([]);
-    const [checkingIn, setCheckingIn] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
 
     // Update current time every second to handle transitions
@@ -65,6 +72,54 @@ export default function GuestView() {
 
     const fetchGuestData = async () => {
         if (!qr_token) {
+            setLoading(false);
+            return;
+        }
+
+        // --- SIMULATION MODE ---
+        if (qr_token.startsWith('sim-')) {
+            const mode = qr_token.split('-')[1]; // before, during, after
+
+            // Mock Event
+            const mockEvent: Event = {
+                id: 'sim-event',
+                name: 'حفل زفاف تجريبي',
+                date: new Date().toISOString(), // Default
+                location: 'قاعة اللؤلؤة، الرياض',
+                location_maps_url: 'https://maps.google.com',
+                qr_activation_enabled: true,
+                features: {
+                    enable_simple_scan: true
+                }
+            };
+
+            // Adjust times based on mode
+            const now = new Date();
+            if (mode === 'before') {
+                mockEvent.qr_active_from = new Date(now.getTime() + 86400000).toISOString(); // Tomorrow
+                mockEvent.qr_active_until = new Date(now.getTime() + 172800000).toISOString();
+                mockEvent.date = new Date(now.getTime() + 86400000).toISOString();
+            } else if (mode === 'during') {
+                mockEvent.qr_active_from = new Date(now.getTime() - 3600000).toISOString(); // 1 hour ago
+                mockEvent.qr_active_until = new Date(now.getTime() + 86400000).toISOString(); // Tomorrow
+                mockEvent.date = new Date().toISOString();
+            } else if (mode === 'after') {
+                mockEvent.qr_active_from = new Date(now.getTime() - 172800000).toISOString(); // 2 days ago
+                mockEvent.qr_active_until = new Date(now.getTime() - 86400000).toISOString(); // Yesterday
+                mockEvent.date = new Date(now.getTime() - 86400000).toISOString();
+            }
+
+            setEvent(mockEvent);
+            setGuest({
+                id: 'sim-guest',
+                name: 'ضيف تجريبي (Demo Guest)',
+                qr_token: qr_token,
+                attended: mode === 'during',
+                table_no: 'VIP-1',
+                companions_count: 3,
+                companions_attended: 0,
+                events: mockEvent
+            });
             setLoading(false);
             return;
         }
@@ -161,50 +216,6 @@ export default function GuestView() {
         }
     };
 
-    const handleCheckIn = async () => {
-        if (!guest) return;
-
-        setCheckingIn(true);
-
-        try {
-            const now = new Date().toISOString();
-
-            // Record scan
-            const { error: scanError } = await supabase
-                .from('scans')
-                .insert({
-                    guest_id: guest.id,
-                    event_id: event?.id,
-                    scanned_at: now,
-                    scan_type: 'entry'
-                });
-
-            if (scanError) throw scanError;
-
-            // Update guest attendance
-            const newCompanionsAttended = (guest.companions_attended || 0) + 1;
-            const totalAllowed = 1 + (guest.companions_count || 0);
-
-            const { error: updateError } = await supabase
-                .from('guests')
-                .update({
-                    attended: true,
-                    attended_at: guest.attended_at || now,
-                    companions_attended: newCompanionsAttended
-                })
-                .eq('id', guest.id);
-
-            if (updateError) throw updateError;
-
-            // Refresh data
-            await fetchGuestData();
-        } catch (error) {
-            console.error('Error checking in:', error);
-            alert('حدث خطأ أثناء تسجيل الدخول');
-        } finally {
-            setCheckingIn(false);
-        }
-    };
 
     if (loading) {
         return (
@@ -239,11 +250,22 @@ export default function GuestView() {
 
     let qrStatus: 'active' | 'not_started' | 'expired' = 'active';
 
+    // Helper to ensure comparison is done in a consistent timezone (UTC)
+    const getActivationDate = (dateStr: string | null | undefined) => {
+        if (!dateStr) return null;
+        if (dateStr.includes(' ') && !dateStr.includes('T') && !dateStr.includes('+') && !dateStr.includes('Z')) {
+            return new Date(dateStr.replace(' ', 'T') + 'Z');
+        }
+        return new Date(dateStr);
+    };
+
     if (qrActivationEnabled) {
-        // Use a 500ms safety buffer to prevent micro-checks and reload loops
-        if (qrActiveFrom && now.getTime() < (qrActiveFrom.getTime() - 500)) {
+        const activeFrom = getActivationDate(event.qr_active_from);
+        const activeUntil = getActivationDate(event.qr_active_until);
+
+        if (activeFrom && now.getTime() < (activeFrom.getTime() - 500)) {
             qrStatus = 'not_started';
-        } else if (qrActiveUntil && now.getTime() > qrActiveUntil.getTime()) {
+        } else if (activeUntil && now.getTime() > activeUntil.getTime()) {
             qrStatus = 'expired';
         }
     }
@@ -299,7 +321,10 @@ export default function GuestView() {
     };
 
     // Show countdown if QR not active yet
-    if (qrStatus === 'not_started' && qrActiveFrom) {
+    if (qrStatus === 'not_started') {
+        const targetDate = getActivationDate(event.qr_active_from);
+        if (!targetDate) return null; // Should not happen if qrStatus is not_started
+
         return (
             <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-6 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] relative overflow-hidden" dir="rtl">
                 {/* Decorative Elements */}
@@ -328,6 +353,9 @@ export default function GuestView() {
                                     <Calendar className="w-5 h-5 text-blue-400" />
                                     <span className="text-lg">{event.date}</span>
                                 </div>
+                                <div className="flex items-center gap-2 text-[#D4AF37] font-bold">
+                                    <span>{event.date ? new Intl.DateTimeFormat('ar-SA-u-ca-islamic-uma', { day: 'numeric', month: 'long', year: 'numeric' }).format(getSafeDate(event.date)!) : ''} هـ</span>
+                                </div>
                                 {event.location && (
                                     <div className="flex items-center gap-2">
                                         <MapPin className="w-5 h-5 text-purple-400" />
@@ -340,7 +368,7 @@ export default function GuestView() {
                         {/* Countdown Section */}
                         <div className="mb-10">
                             <p className="text-gray-400 mb-6 uppercase tracking-widest text-sm font-bold">يفتح مسح الباركود خلال</p>
-                            <CountdownTimer targetDate={qrActiveFrom} />
+                            <CountdownTimer targetDate={targetDate} />
                         </div>
 
                         {/* Guest Welcome */}
@@ -356,7 +384,7 @@ export default function GuestView() {
 
                         {/* Bottom Info */}
                         <div className="mt-8 flex items-center justify-center gap-2 text-indigo-400/60 text-sm">
-                            <Lock className="w-4 h-4" />
+                            <LockIcon className="w-4 h-4" />
                             <span>يتم تأمين الدخول حتى الموعد المحدد</span>
                         </div>
                     </div>
@@ -410,9 +438,14 @@ export default function GuestView() {
                         <Calendar className="w-8 h-8 text-blue-400" />
                     </div>
                     <h2 className="text-3xl font-black text-white mb-2">{event.name}</h2>
-                    <div className="flex items-center justify-center gap-2 text-gray-400">
-                        <Clock className="w-5 h-5" />
-                        <span>{event.date}</span>
+                    <div className="flex flex-col items-center gap-1 text-gray-400">
+                        <div className="flex items-center gap-2">
+                            <Clock className="w-5 h-5" />
+                            <span>{event.date}</span>
+                        </div>
+                        <div className="text-[#D4AF37] text-sm font-bold">
+                            {event.date ? new Intl.DateTimeFormat('ar-SA-u-ca-islamic-uma', { day: 'numeric', month: 'long', year: 'numeric' }).format(getSafeDate(event.date)!) : ''} هـ
+                        </div>
                     </div>
                 </div>
 
@@ -520,7 +553,7 @@ export default function GuestView() {
                 <div className="fixed bottom-6 left-6 right-6 z-50 animate-in slide-in-from-bottom-10 duration-700">
                     <div className="bg-orange-500/10 backdrop-blur-2xl border border-orange-500/20 p-6 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center gap-6">
                         <div className="bg-orange-500 p-4 rounded-2xl shadow-lg shadow-orange-500/20">
-                            <Lock className="w-8 h-8 text-white" />
+                            <LockIcon className="w-8 h-8 text-white" />
                         </div>
                         <div>
                             <h4 className="font-black text-white text-lg">وضع الأمان مفعل</h4>

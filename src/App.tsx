@@ -24,6 +24,7 @@ import WhatsAppSender from './pages/WhatsAppSender';
 import SalesAI from './pages/SalesAI';
 import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
+import CampaignCenter from './pages/CampaignCenter';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import EventSummary from './pages/EventSummary';
 
@@ -91,6 +92,7 @@ const AppContent: React.FC = () => {
                 <Route path="/sales-ai" element={<SalesAI />} />
                 <Route path="/quick-upload" element={<QuickWhatsAppUpload />} />
                 <Route path="/external-upload" element={<ExternalCardsUpload />} />
+                <Route path="/campaigns" element={<CampaignCenter />} />
                 <Route path="/analytics" element={<AnalyticsDashboard />} />
                 <Route path="/event-summary/:eventId" element={<EventSummary />} />
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />

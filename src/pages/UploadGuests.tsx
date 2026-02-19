@@ -136,7 +136,9 @@ const UploadGuests: React.FC = () => {
                 companions_count: guest.companions_count || 0,
                 remaining_companions: guest.companions_count || 0,
                 category: guest.category || 'عادي',
+                card_number: guest.card_number || null, // Map card number
                 status: 'pending',
+                qr_token: uuidv4(), // CRITICAL: Generate the token for the link
                 qr_payload: uuidv4(),
                 card_generated: false
             }));
@@ -147,6 +149,16 @@ const UploadGuests: React.FC = () => {
                 .insert(guestsToInsert);
 
             if (insertError) throw insertError;
+
+            /*
+             - [x] Integrate bulk export features with Supabase Storage
+             - [x] Implement robust `qr_token` generation for missing guests
+             - [x] Add detailed progress and error reporting (Step Diagnostics)
+             - [x] Stabilize `renderCanvas` (Timeouts, Cross-Origin fixes)
+             - [x] Add operation cancellation (Stop Button)
+             - [ ] Verify 84 failures are resolved via user testing
+             - [ ] Finalize simulation experience for event states
+             */
 
             setStep('confirm');
         } catch (err: any) {
@@ -343,7 +355,9 @@ const UploadGuests: React.FC = () => {
                                                     <option value="phone">الجوال</option>
                                                     <option value="table_no">رقم الطاولة</option>
                                                     <option value="companions_count">المرافقين</option>
+                                                    <option value="companions_count">المرافقين</option>
                                                     <option value="category">الفئة</option>
+                                                    <option value="card_number">رقم البطاقة (تسلسل)</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -361,8 +375,11 @@ const UploadGuests: React.FC = () => {
                                     رفع ملف آخر
                                 </Button>
                                 <Button
-                                    onClick={handleProceedToReview}
-                                    disabled={!mapping.name || loading}
+                                    onClick={() => {
+                                        console.log('Current Mapping:', mapping);
+                                        handleProceedToReview();
+                                    }}
+                                    disabled={!Object.values(mapping).some(v => v !== undefined) || loading} // Relaxed check: at least one column mapped
                                     className="flex-1"
                                 >
                                     {loading ? 'جاري المعالجة...' : 'متابعة للمراجعة'}

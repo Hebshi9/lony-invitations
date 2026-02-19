@@ -65,6 +65,9 @@ const EventManager: React.FC = () => {
                     host_pin: features.enable_host_pin ? hostPin : null,
                     activation_time: activationTimestamp,
                     opening_time: openingTimestamp,
+                    qr_active_from: activationTimestamp,
+                    qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
+                    qr_activation_enabled: !!features.qr_time_restricted,
                     country,
                     features: features,
                     settings: {

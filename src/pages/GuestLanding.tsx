@@ -109,10 +109,115 @@ export default function GuestLanding() {
         );
     }
 
+    // Check if registration is required
+    const isGenericGuest = guest.name.includes('بطاقة رقم') || guest.name.includes('Guest #') || (guest as any).is_generic;
+    const registrationRequired = hasFeature(event, 'enable_registration') && isGenericGuest;
+    const [regName, setRegName] = useState('');
+    const [regPhone, setRegPhone] = useState('');
+    const [regCompanions, setRegCompanions] = useState(0);
+    const [submittingReg, setSubmittingReg] = useState(false);
+    const [isRegistered, setIsRegistered] = useState(false);
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!regName.trim() || regName.length < 3) {
+            alert('يرجى إدخال الاسم الثلاثي بشكل صحيح');
+            return;
+        }
+        setSubmittingReg(true);
+        try {
+            const { error: updateError } = await supabase
+                .from('guests')
+                .update({
+                    name: regName,
+                    phone: regPhone,
+                    companions_count: regCompanions,
+                    status: 'confirmed',
+                    // Mark it as no longer generic if we had a flag
+                })
+                .eq('id', guest.id);
+
+            if (updateError) throw updateError;
+
+            // Success - refresh local stated
+            setGuest({ ...guest, name: regName, companions_count: regCompanions });
+            setIsRegistered(true);
+        } catch (err: any) {
+            alert('حدث خطأ أثناء التسجيل: ' + err.message);
+        } finally {
+            setSubmittingReg(false);
+        }
+    };
+
     // Generate the Image URL based on convention (storage/cards/{guest_id}.png)
-    // NOTE: This assumes images are uploaded to a public bucket named 'cards' or similar. 
-    // We might need to generate a signed URL if it's private.
     const cardImageUrl = supabase.storage.from('cards').getPublicUrl(`${guest.id}.png`).data.publicUrl;
+
+    if (registrationRequired && !isRegistered) {
+        return (
+            <div className="min-h-screen bg-indigo-950 text-white flex flex-col items-center relative overflow-hidden font-cairo" dir="rtl">
+                <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-black/50 to-transparent z-0"></div>
+                <div className="z-10 w-full max-w-md bg-white rounded-t-3xl shadow-2xl mt-12 min-h-screen flex flex-col px-8 py-10 animate-slide-up">
+                    <div className="text-center mb-8">
+                        <div className="inline-flex items-center justify-center w-20 h-20 bg-amber-50 rounded-full mb-4 border border-amber-100">
+                            <Lock className="w-10 h-10 text-amber-600" />
+                        </div>
+                        <h1 className="text-2xl font-black text-indigo-950 mb-2">{event.name}</h1>
+                        <p className="text-gray-500 font-medium">يرجى تسجيل بياناتك لتفعيل بطاقة الدعوة الخاصة بك</p>
+                    </div>
+
+                    <form onSubmit={handleRegister} className="space-y-6">
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-gray-700">الاسم الكامل</label>
+                            <input
+                                required
+                                type="text"
+                                placeholder="ادخل اسمك الثلاثي"
+                                className="w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-2xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                                value={regName}
+                                onChange={(e) => setRegName(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-gray-700">رقم الجوال (اختياري)</label>
+                            <input
+                                type="tel"
+                                placeholder="05xxxxxxxx"
+                                className="w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-2xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                                value={regPhone}
+                                onChange={(e) => setRegPhone(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-gray-700">عدد المرافقين معك</label>
+                            <select
+                                className="w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-2xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                                value={regCompanions}
+                                onChange={(e) => setRegCompanions(parseInt(e.target.value))}
+                            >
+                                {[0, 1, 2, 3, 4, 5].map(n => (
+                                    <option key={n} value={n}>{n === 0 ? 'بدون مرافقين' : `${n} مرافقين`}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <Button
+                            type="submit"
+                            disabled={submittingReg}
+                            className="w-full h-16 bg-indigo-950 hover:bg-black text-white rounded-2xl text-lg font-bold shadow-xl shadow-indigo-900/20 transform active:scale-95 transition-all"
+                        >
+                            {submittingReg ? 'جاري التفعيل...' : 'تفعيل بطاقة الدعوة'}
+                        </Button>
+                    </form>
+
+                    <div className="mt-auto py-10 text-center opacity-40">
+                        <p className="text-[10px] tracking-widest uppercase">Secured by Lony Invitations Platform</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-indigo-950 text-white flex flex-col items-center relative overflow-hidden font-cairo">

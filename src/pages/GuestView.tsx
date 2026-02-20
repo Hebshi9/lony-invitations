@@ -152,6 +152,14 @@ export default function GuestView() {
                     setScans(scansData);
                 }
 
+                // Check if registration is required for generic guests
+                const isGenericGuest = guestData.name.includes('بطاقة رقم') || guestData.name.includes('Guest #') || (guestData as any).is_generic;
+                if (hasFeature(guestData.events, 'enable_registration') && isGenericGuest) {
+                    // Redirect to landing page for registration
+                    window.location.href = `/invite/${guestData.id}`;
+                    return;
+                }
+
                 // AUTO CHECK-IN: Register check-in automatically on page load
                 // Only if QR is active and has remaining scans
                 const totalAllowed = 1 + (guestData.companions_count || 0);

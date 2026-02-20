@@ -803,6 +803,11 @@ function UnifiedInvitationStudioContent() {
         if (!text || !guest) return text;
 
         return text.replace(/\{([^}]+)\}/g, (match, key) => {
+            // Handle {serial} alias to card_number
+            if (key === 'serial') {
+                return guest.card_number || '';
+            }
+
             // Handle nested keys like custom_data.Seat
             if (key.includes('.')) {
                 const parts = key.split('.');
@@ -810,10 +815,10 @@ function UnifiedInvitationStudioContent() {
                 for (const part of parts) {
                     value = value ? value[part] : undefined;
                 }
-                return value !== undefined ? value : match; // Keep placeholder if value missing
+                return value !== undefined && value !== null ? String(value) : '';
             }
             // Handle standard keys
-            return guest[key] !== undefined ? guest[key] : match;
+            return guest[key] !== undefined && guest[key] !== null ? String(guest[key]) : '';
         });
     };
 

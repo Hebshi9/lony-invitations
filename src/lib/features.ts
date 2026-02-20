@@ -23,6 +23,7 @@ export interface EventFeatures {
     // Advanced Customization
     custom_checkin_page: boolean;
     enable_categories: boolean;
+    enable_registration: boolean;      // Guest must register if name is generic
 }
 
 export const DEFAULT_FEATURES: EventFeatures = {
@@ -39,6 +40,7 @@ export const DEFAULT_FEATURES: EventFeatures = {
     instant_notifications: false,
     custom_checkin_page: false,
     enable_categories: false,
+    enable_registration: false,
 };
 
 export interface FeatureMetadata {
@@ -151,6 +153,11 @@ export const FEATURE_CATEGORIES: Record<string, { title: string; icon: string; f
                 key: 'enable_categories',
                 label: 'فئات الضيوف المتقدمة',
                 description: 'تصنيف متقدم مع ألوان وصلاحيات مختلفة',
+            },
+            {
+                key: 'enable_registration',
+                label: 'تفعيل رابط التسجيل المفتوح',
+                description: 'يسمح للضيوف المجهولين بتسجيل بياناتهم عند المسح',
             },
         ],
     },

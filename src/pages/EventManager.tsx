@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { supabase } from '../lib/supabaseClient';
@@ -6,7 +6,12 @@ import { Calendar, MapPin, Type, Loader2, CheckCircle, QrCode, Clock } from 'luc
 import FeaturesSelector from '../components/FeaturesSelector';
 import { EventFeatures, DEFAULT_FEATURES } from '../lib/features';
 
-const EventManager: React.FC = () => {
+interface EventManagerProps {
+    initialEvent?: any;
+    onSuccess?: () => void;
+}
+
+const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) => {
     const [name, setName] = useState('');
     const [date, setDate] = useState('');
     const [venue, setVenue] = useState('');
@@ -22,12 +27,39 @@ const EventManager: React.FC = () => {
     const [hostPin, setHostPin] = useState('');
 
     // QR Settings State
-    const [qrSettings, setQrSettings] = useState({
-        show_name: true,
-        show_table: true,
-        show_companions: true,
-        show_category: false
+    const [qrSettings, setQrSettings] = useState(() => {
+        if (initialEvent?.settings?.qr_fields) {
+            return initialEvent.settings.qr_fields;
+        }
+        return {
+            show_name: true,
+            show_table: true,
+            show_companions: true,
+            show_category: false
+        };
     });
+
+    useEffect(() => {
+        if (initialEvent) {
+            setName(initialEvent.name || '');
+            setDate(initialEvent.date || '');
+            setVenue(initialEvent.venue || '');
+            setCountry(initialEvent.country || 'Saudi Arabia');
+            setHostPin(initialEvent.host_pin || '');
+
+            if (initialEvent.activation_time) {
+                const actTime = new Date(initialEvent.activation_time);
+                setActivationTime(`${actTime.getHours().toString().padStart(2, '0')}:${actTime.getMinutes().toString().padStart(2, '0')}`);
+            }
+            if (initialEvent.opening_time) {
+                const openTime = new Date(initialEvent.opening_time);
+                setOpeningTime(`${openTime.getHours().toString().padStart(2, '0')}:${openTime.getMinutes().toString().padStart(2, '0')}`);
+            }
+            if (initialEvent.features) {
+                setFeatures({ ...DEFAULT_FEATURES, ...initialEvent.features });
+            }
+        }
+    }, [initialEvent]);
 
     const handleSubmit = async () => {
         if (!name || !date) {
@@ -55,47 +87,50 @@ const EventManager: React.FC = () => {
                 openingTimestamp = new Date(`${date}T${openingTime}`).toISOString();
             }
 
-            const { error } = await supabase
-                .from('events')
-                .insert({
-                    name,
-                    date,
-                    venue,
-                    token,
-                    host_pin: features.enable_host_pin ? hostPin : null,
-                    activation_time: activationTimestamp,
-                    opening_time: openingTimestamp,
-                    qr_active_from: activationTimestamp,
-                    qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
-                    qr_activation_enabled: !!features.qr_time_restricted,
-                    country,
-                    features: features,
-                    settings: {
-                        qr_fields: {
-                            ...qrSettings,
-                            show_custom: []
-                        },
-                        portal_settings: {}
-                    }
-                });
+            let error;
+            if (initialEvent) {
+                const { error: updateError } = await supabase
+                    .from('events')
+                    .update({
+                        name, date, venue,
+                        host_pin: features.enable_host_pin ? hostPin : null,
+                        activation_time: activationTimestamp,
+                        opening_time: openingTimestamp,
+                        qr_active_from: activationTimestamp,
+                        qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
+                        qr_activation_enabled: !!features.qr_time_restricted,
+                        country, features: features,
+                        settings: { qr_fields: { ...qrSettings, show_custom: [] }, portal_settings: {} }
+                    })
+                    .eq('id', initialEvent.id);
+                error = updateError;
+            } else {
+                const { error: insertError } = await supabase
+                    .from('events')
+                    .insert({
+                        name, date, venue, token,
+                        host_pin: features.enable_host_pin ? hostPin : null,
+                        activation_time: activationTimestamp,
+                        opening_time: openingTimestamp,
+                        qr_active_from: activationTimestamp,
+                        qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
+                        qr_activation_enabled: !!features.qr_time_restricted,
+                        country, features: features,
+                        settings: { qr_fields: { ...qrSettings, show_custom: [] }, portal_settings: {} }
+                    });
+                error = insertError;
+            }
 
             if (error) throw error;
 
-            setGeneratedToken(token);
-            setMessage('تم إنشاء الحدث بنجاح');
-            setName('');
-            setDate('');
-            setVenue('');
-            setActivationTime('');
-            setOpeningTime('13:00');
-            setHostPin('');
-            setFeatures(DEFAULT_FEATURES);
-            setQrSettings({
-                show_name: true,
-                show_table: true,
-                show_companions: true,
-                show_category: false
-            });
+            if (!initialEvent) {
+                setGeneratedToken(token);
+                setName(''); setDate(''); setVenue(''); setActivationTime(''); setOpeningTime('13:00'); setHostPin(''); setFeatures(DEFAULT_FEATURES);
+                setQrSettings({ show_name: true, show_table: true, show_companions: true, show_category: false });
+            }
+
+            setMessage(initialEvent ? 'تم تحديث الحدث بنجاح' : 'تم إنشاء الحدث بنجاح');
+            if (onSuccess) onSuccess();
 
         } catch (error: any) {
             console.error('Error creating event:', error);
@@ -108,7 +143,7 @@ const EventManager: React.FC = () => {
     return (
         <div className="space-y-8 font-kufi" dir="rtl">
             <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-lony-navy font-amiri">إعداد الحدث الجديد</h1>
+                <h1 className="text-3xl font-bold text-lony-navy font-amiri">{initialEvent ? 'تعديل الحدث' : 'إعداد الحدث الجديد'}</h1>
             </div>
 
             {message && (
@@ -308,7 +343,7 @@ const EventManager: React.FC = () => {
                         disabled={loading}
                         className="w-full bg-lony-navy hover:bg-lony-navy/90 text-white py-6 text-lg rounded-xl shadow-lg shadow-lony-navy/20 transition-all hover:scale-[1.02]"
                     >
-                        {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'إنشاء الحدث'}
+                        {loading ? <Loader2 className="w-6 h-6 animate-spin mx-auto" /> : (initialEvent ? 'حفظ التغييرات' : 'إنشاء الحدث')}
                     </Button>
                 </div>
 

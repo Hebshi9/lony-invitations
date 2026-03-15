@@ -24,17 +24,24 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ accounts, onAccountsC
         if (!newPhone) return alert('الرجاء إدخال رقم الهاتف');
 
         try {
-            await fetch(`${API_URL}/accounts`, {
+            const response = await fetch(`${API_URL}/accounts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: newPhone, name: newName || newPhone })
             });
+
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok || data.success === false) {
+                throw new Error(data.error || data.message || 'فشل الاتصال بسيرفر Evolution API');
+            }
+
             setNewPhone('');
             setNewName('');
             onAccountsChange();
             alert('تم إضافة الحساب بنجاح!');
         } catch (error: any) {
-            alert('خطأ: ' + error.message);
+            alert('خطأ في إضافة الحساب: ' + error.message + '\n\nتأكد من تشغيل سيرفر الواتساب (Evolution API).');
         }
     };
 

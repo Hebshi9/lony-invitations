@@ -41,12 +41,13 @@ class BaileysService {
         const authPath = `${this.authFolders}/${accountId}`;
         console.log(`[Baileys] Auth path: ${authPath}`);
 
+        let sock;
         try {
             const { state, saveCreds } = await useMultiFileAuthState(authPath);
             const { version } = await fetchLatestBaileysVersion();
             console.log(`[Baileys] Using Baileys version: ${version}`);
 
-            const sock = makeWASocket({
+            sock = makeWASocket({
                 version,
                 logger: pino({ level: 'silent' }), // Hide verbose logs
                 printQRInTerminal: false,

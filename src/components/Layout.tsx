@@ -13,7 +13,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     const navigation = [
         { name: 'لوحة التحكم', href: '/dashboard', icon: LayoutDashboard },
         { name: 'الإحصائيات', href: '/analytics', icon: BarChart3 },
-        { name: 'إعداد الحدث', href: '/event', icon: Calendar },
+        { name: 'إدارة المناسبات', href: '/admin/events', icon: Calendar },
         { name: 'قائمة الضيوف', href: '/upload-guests', icon: Users },
         { name: 'استوديو الدعوات', href: '/studio', icon: Wand2 },
         { name: 'إرسال واتساب', href: '/whatsapp-sender', icon: MessageCircle },

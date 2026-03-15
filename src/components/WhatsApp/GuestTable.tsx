@@ -7,9 +7,10 @@ import { Button } from '../ui/Button';
 interface GuestTableProps {
     guests: any[];
     onRetry: (guest: any) => void;
+    onOverrideStatus?: (guest: any, newStatus: string) => void;
 }
 
-const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry }) => {
+const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onOverrideStatus }) => {
 
     // Helper to get status icon and color
     const getStatusInfo = (status: string, phase: string) => {
@@ -75,9 +76,23 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry }) => {
                                         </div>
                                     </td>
                                     <td className="p-3">
-                                        <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${rsvpInfo.color}`}>
-                                            <span>{rsvpInfo.icon}</span>
-                                            {rsvpInfo.label}
+                                        <div className="flex flex-col gap-1 items-end">
+                                            <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${rsvpInfo.color}`}>
+                                                <span>{rsvpInfo.icon}</span>
+                                                {rsvpInfo.label}
+                                            </div>
+                                            {onOverrideStatus && (
+                                                <select
+                                                    value={guest.rsvp_status || 'pending'}
+                                                    onChange={(e) => onOverrideStatus(guest, e.target.value)}
+                                                    className="text-[10px] mt-1 border border-gray-200 rounded p-0.5 bg-white text-gray-600 focus:ring-1 focus:ring-lony-gold w-20 cursor-pointer"
+                                                >
+                                                    <option value="pending">تعيين يديوي..</option>
+                                                    <option value="confirmed">تأكيد حضور</option>
+                                                    <option value="declined">إعتذار</option>
+                                                    <option value="maybe">ربما</option>
+                                                </select>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="p-3">

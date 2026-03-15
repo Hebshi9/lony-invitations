@@ -255,8 +255,6 @@
         // Debug log helper
         function debugLog(msg) {
             console.log('[CHECK-IN DEBUG]', msg);
-            const d = document.getElementById('debug-panel');
-            if (d) d.innerHTML += msg + '<br>';
         }
 
         async function apiCall(endpoint, options = {}) {
@@ -291,10 +289,6 @@
 
         async function init() {
             // Add debug panel
-            const dp = document.createElement('div');
-            dp.id = 'debug-panel';
-            dp.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:10px;max-height:200px;overflow:auto;font-family:monospace;z-index:9999;direction:ltr;text-align:left';
-            document.body.appendChild(dp);
             debugLog('🚀 Init started. Token: ' + qrToken);
 
             // ─── TEST MODE HANDLING ───
@@ -332,29 +326,30 @@
                 const event = guest.events;
 
                 // ─── CHECK ACTIVATION WINDOW ───
-                // Use backend setting or default to 1:00 PM on event date
-                let activeFrom, activeUntil;
+                // Only enforce time restrictions if explicitly enabled for the event
+                if (event.qr_activation_enabled) {
+                    let activeFrom, activeUntil;
 
-                if (event.qr_activation_enabled && event.qr_active_from) {
-                    activeFrom = new Date(event.qr_active_from);
-                    activeUntil = new Date(event.qr_active_until);
-                } else if (event.date) {
-                    // Default: Opens at 1:00 PM on event day
-                    activeFrom = new Date(event.date);
-                    activeFrom.setHours(13, 0, 0, 0); // 13:00 = 1:00 PM
-
-                    // Default: Closes 24 hours later
-                    activeUntil = new Date(activeFrom);
-                    activeUntil.setHours(activeFrom.getHours() + 24);
-                }
-
-                if (activeFrom && activeUntil) {
-                    const now = new Date();
-                    if (now < activeFrom) {
-                        return showCountdown(guest, event, activeFrom);
+                    if (event.qr_active_from) {
+                        activeFrom = new Date(event.qr_active_from);
+                        activeUntil = new Date(event.qr_active_until);
+                    } else if (event.date) {
+                        // Default: Opens at 1:00 PM on event day
+                        activeFrom = new Date(event.date);
+                        activeFrom.setHours(13, 0, 0, 0); // 13:00 = 1:00 PM
+                        // Default: Closes 24 hours later
+                        activeUntil = new Date(activeFrom);
+                        activeUntil.setHours(activeFrom.getHours() + 24);
                     }
-                    if (now > activeUntil) {
-                        return showExpired(guest, event);
+
+                    if (activeFrom && activeUntil) {
+                        const now = new Date();
+                        if (now < activeFrom) {
+                            return showCountdown(guest, event, activeFrom);
+                        }
+                        if (now > activeUntil) {
+                            return showExpired(guest, event);
+                        }
                     }
                 }
 

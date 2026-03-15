@@ -223,7 +223,7 @@ const AnalyticsDashboard: React.FC = () => {
                 'تم توليد الكرت': g.card_generated ? 'نعم' : 'لا',
                 'رقم الكرت': g.card_number,
                 'تاريخ التوليد': g.card_generated_at ? new Date(g.card_generated_at).toLocaleDateString('ar-SA') : '-',
-                'رابط الدعوة': `https://lonyinvite.netlify.app/check-in.html?token=${g.qr_token}`
+                'رابط الدعوة': `https://lonyinvit.netlify.app/check-in.html?token=${g.qr_token}`
             }));
 
             // Generate Sheet

@@ -120,7 +120,7 @@ const EventSummary: React.FC = () => {
         );
     }
 
-    const baseUrl = 'https://lonyinvite.netlify.app';
+    const baseUrl = 'https://lonyinvit.netlify.app';
     const inspectorUrl = `${baseUrl}/scanner/${event.token}`;
     const clientDashboardUrl = `${baseUrl}/client-dashboard/${event.id}`;
     const analyticsUrl = `${baseUrl}/analytics`;
@@ -431,8 +431,8 @@ const EventSummary: React.FC = () => {
                                                 key={index}
                                                 onClick={() => setCurrentDemoIndex(index)}
                                                 className={`w-3 h-3 rounded-full transition-all ${index === currentDemoIndex
-                                                        ? 'bg-indigo-600 w-8'
-                                                        : 'bg-gray-300 hover:bg-gray-400'
+                                                    ? 'bg-indigo-600 w-8'
+                                                    : 'bg-gray-300 hover:bg-gray-400'
                                                     }`}
                                             />
                                         ))}

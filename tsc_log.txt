@@ -1,0 +1,6 @@
+src/pages/UnifiedInvitationStudio.tsx(1345,23): error TS17002: Expected corresponding JSX closing tag for 'CardContent'.
+src/pages/UnifiedInvitationStudio.tsx(1346,19): error TS17002: Expected corresponding JSX closing tag for 'Card'.
+src/pages/UnifiedInvitationStudio.tsx(1347,15): error TS17002: Expected corresponding JSX closing tag for 'div'.
+src/pages/UnifiedInvitationStudio.tsx(1817,13): error TS1005: ')' expected.
+src/pages/UnifiedInvitationStudio.tsx(2171,9): error TS1128: Declaration or statement expected.
+src/pages/UnifiedInvitationStudio.tsx(2172,5): error TS1109: Expression expected.

@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build"
+  command = "echo skipping-build"
   publish = "dist"
 
 [dev]
@@ -11,6 +11,20 @@
   from = "/check-in.html"
   to = "/check-in.html"
   status = 200
+
+# Proxy to Remote WhatsApp VPS (Bypass Mixed Content Block)
+[[redirects]]
+  from = "/api/remote-whatsapp/*"
+  to = "http://62.171.172.76:3001/api/whatsapp/:splat"
+  status = 200
+  force = true
+
+# Proxy to Remote Sales AI VPS
+[[redirects]]
+  from = "/api/remote-sales/*"
+  to = "http://62.171.172.76:3001/api/sales/:splat"
+  status = 200
+  force = true
 
 # SPA fallback for all other routes
 [[redirects]]

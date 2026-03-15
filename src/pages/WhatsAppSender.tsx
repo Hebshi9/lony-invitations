@@ -80,6 +80,7 @@ export default function WhatsAppSender() {
     const [events, setEvents] = useState<any[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<string>('');
     const [accounts, setAccounts] = useState<any[]>([]);
+    const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
     // Guest Data
     const [guests, setGuests] = useState<any[]>([]);
@@ -150,7 +151,13 @@ export default function WhatsAppSender() {
         try {
             const res = await fetch(`${API_URL}/accounts`);
             const data = await res.json();
-            if (data.success) setAccounts(data.accounts);
+            if (data.success) {
+                setAccounts(data.accounts);
+                const connected = data.accounts.filter((a: any) => a.connected);
+                if (connected.length > 0) {
+                    setSelectedAccountId(prev => prev || connected[0].id);
+                }
+            }
         } catch (e) { addLog('❌ Failed to fetch accounts'); }
     };
 
@@ -187,6 +194,23 @@ export default function WhatsAppSender() {
 
         setGuests(processed);
         setLoadingGuests(false);
+    };
+
+    const handleOverrideStatus = async (guest: any, newStatus: string) => {
+        try {
+            const { error } = await supabase
+                .from('guests')
+                .update({ rsvp_status: newStatus })
+                .eq('id', guest.id);
+
+            if (error) throw error;
+
+            // Update local state immediately
+            setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, rsvp_status: newStatus } : g));
+            addLog(`✅ تم تخطي وتحديث حالة ${guest.name} يدوياً إلى: ${newStatus}`);
+        } catch (e: any) {
+            alert('فشل في تحديث الحالة: ' + e.message);
+        }
     };
 
     // === ACTIONS ===
@@ -253,7 +277,8 @@ export default function WhatsAppSender() {
                 body: JSON.stringify({
                     eventId: selectedEventId,
                     mode: sendingSpeed, // 'fast', 'balanced', 'safe'
-                    useButtons: useButtons
+                    useButtons: useButtons,
+                    accountId: selectedAccountId
                 })
             });
 
@@ -414,6 +439,26 @@ export default function WhatsAppSender() {
 
                     <div className="w-full h-px bg-gray-100" />
 
+                    {/* Sender Account Selection */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">حساب الإرسال</label>
+                        <select
+                            value={selectedAccountId}
+                            onChange={(e) => setSelectedAccountId(e.target.value)}
+                            className="w-full p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold text-gray-700 shadow-sm"
+                        >
+                            <option value="">-- الجوال الافتراضي --</option>
+                            {accounts.filter(a => a.connected).map(a => (
+                                <option key={a.id} value={a.id}>📱 {a.name || a.phone}</option>
+                            ))}
+                        </select>
+                        <div className="mt-2 text-[10px] text-gray-500">
+                            اختر الرقم الذي سيتم إرسال الحملة منه.
+                        </div>
+                    </div>
+
+                    <div className="w-full h-px bg-gray-100" />
+
                     {/* Devices */}
                     <div>
                         <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">الأجهزة المتصلة</label>
@@ -464,7 +509,7 @@ export default function WhatsAppSender() {
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 pb-20">
 
                             {/* Left: Guest Table (Takes more space) */}
-                            <div className="xl:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
+                            <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
                                 <div className="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0">
                                     <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
                                         <User className="w-4 h-4 text-gray-400" />
@@ -478,13 +523,13 @@ export default function WhatsAppSender() {
                                 </div>
                                 <div className="flex-1 overflow-hidden relative">
                                     <div className="absolute inset-0">
-                                        <GuestTable guests={guests} onRetry={() => { }} />
+                                        <GuestTable guests={guests} onRetry={() => { }} onOverrideStatus={handleOverrideStatus} />
                                     </div>
                                 </div>
                             </div>
 
                             {/* Right: Smart Editor (Sticky on large screens) */}
-                            <div className="xl:col-span-4 flex flex-col gap-4">
+                            <div className="xl:col-span-5 flex flex-col gap-4">
                                 {!selectedEventId ? (
                                     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
                                         <Bot className="w-16 h-16 mb-4 opacity-10" />
@@ -585,7 +630,7 @@ export default function WhatsAppSender() {
                                                                 await fetch(`${API_URL}/stop`, { method: 'POST' });
                                                                 setQueueStatus((p: any) => ({ ...p, isRunning: false }));
                                                             }}>إيقاف كلي</Button>
-                                                            <Button size="sm" variant="secondary" className="flex-1 bg-indigo-50 text-indigo-700 border border-indigo-100" onClick={async () => {
+                                                            <Button size="sm" variant="outline" className="flex-1 bg-indigo-50 text-indigo-700 border border-indigo-100" onClick={async () => {
                                                                 const ep = queueStatus.isPaused ? 'resume' : 'pause';
                                                                 await fetch(`${API_URL}/${ep}`, { method: 'POST' });
                                                                 setQueueStatus((p: any) => ({ ...p, isPaused: !p.isPaused }));

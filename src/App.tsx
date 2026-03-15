@@ -4,12 +4,11 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import OrderDetails from './pages/OrderDetails';
-import EventManager from './pages/EventManager';
+import AdminEventsPanel from './pages/AdminEventsPanel';
 import UploadGuests from './pages/UploadGuests';
 
 import UnifiedInvitationStudio from './pages/UnifiedInvitationStudio';
 import InvitationStudio from './pages/InvitationStudio';
-import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
 import Scanner from './pages/Scanner';
 import EventScanner from './pages/EventScanner';
@@ -37,7 +36,7 @@ const AppContent: React.FC = () => {
     const { user, loading } = useAuth();
 
     // Routes that don't need authentication (public routes)
-    const publicRoutes = ['/client/', '/portal/', '/scanner', '/v/', '/invite/', '/intake', '/inspector', '/verify-scan/'];
+    const publicRoutes = ['/host/', '/portal/', '/scanner', '/v/', '/invite/', '/intake', '/inspector', '/verify-scan/'];
     const isPublic = publicRoutes.some(path => location.pathname.startsWith(path));
 
     // Show loading spinner while checking auth
@@ -56,8 +55,7 @@ const AppContent: React.FC = () => {
     if (isPublic) {
         return (
             <Routes>
-                <Route path="/client/login" element={<ClientLogin />} />
-                <Route path="/client/dashboard/:eventId" element={<ClientDashboard />} />
+                <Route path="/host/:magicToken" element={<ClientDashboard />} />
                 <Route path="/scanner" element={<Scanner />} />
                 <Route path="/scanner/:token" element={<EventScanner />} />
                 <Route path="/v/:qr_token" element={<GuestView />} />
@@ -66,7 +64,6 @@ const AppContent: React.FC = () => {
                 <Route path="/verify-scan/:id" element={<VerifyGuest />} />
                 <Route path="/inspector" element={<InspectorLogin />} />
                 <Route path="/intake" element={<ClientIntake />} />
-                <Route path="/portal/:orderId" element={<ClientDashboard />} />
                 <Route path="/client-dashboard/:orderId" element={<ClientDashboard />} />
             </Routes>
         );
@@ -82,7 +79,7 @@ const AppContent: React.FC = () => {
             <Routes>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/orders/:id" element={<OrderDetails />} />
-                <Route path="/event" element={<EventManager />} />
+                <Route path="/admin/events" element={<AdminEventsPanel />} />
                 <Route path="/upload-guests" element={<UploadGuests />} />
                 <Route path="/studio" element={<UnifiedInvitationStudio />} />
                 <Route path="/studio-new" element={<InvitationStudio />} />

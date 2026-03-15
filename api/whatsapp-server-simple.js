@@ -10,7 +10,7 @@ import rsvpAI from '../src/services/rsvp-ai-service.js';
 import { fillTemplate, getTemplateVariables } from '../src/services/message-templates.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 // Global Error Handlers to prevent crash
 process.on('uncaughtException', (err) => {
@@ -500,14 +500,20 @@ app.post('/api/whatsapp/send', async (req, res) => {
 
 // Bulk Sending Logic
 app.post('/api/whatsapp/send-batch', async (req, res) => {
-    const { eventId, mode = 'balanced', useButtons = false } = req.body;
+    const { eventId, mode = 'balanced', useButtons = false, accountId } = req.body;
     if (jobState.isRunning) return res.status(400).json({ error: 'Job already running' });
 
     // 1. Get connected account
-    const { data: accounts } = await supabase.from('whatsapp_accounts').select('id, phone').eq('status', 'connected');
+    let account = null;
+    if (accountId) {
+        const { data: accounts } = await supabase.from('whatsapp_accounts').select('id, phone').eq('id', accountId).eq('status', 'connected');
+        account = accounts?.[0];
+    } else {
+        const { data: accounts } = await supabase.from('whatsapp_accounts').select('id, phone').eq('status', 'connected');
+        account = accounts?.[0];
+    }
 
     // Fallback if no DB accounts
-    let account = accounts?.[0];
     if (!account) {
         const adminPhone = process.env.ADMIN_PHONE || '+966503678789';
         const adminId = adminPhone.replace(/[^0-9]/g, '');

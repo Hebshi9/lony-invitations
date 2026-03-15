@@ -140,7 +140,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {activeTab === 'overview' && (
-                <>
+                <div className="space-y-6 animate-in fade-in duration-500">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <Card>
                             <CardHeader>
@@ -215,7 +215,7 @@ const Dashboard: React.FC = () => {
                             </div>
                         </CardContent>
                     </Card>
-                </>
+                </div>
             )}
 
             {activeTab === 'intake' && <IntakeRequestList />}

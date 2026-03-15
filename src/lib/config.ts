@@ -15,8 +15,8 @@ const getApiUrl = () => {
     // Logic: Use the current window hostname (localhost, 127.0.0.1, or network IP)
     const host = window.location.hostname || 'localhost';
 
-    // In local development, the backend usually lives on port 3001
-    return `http://${host}:3001/api/whatsapp`;
+    // In local development, the Evolution API adapter usually lives on port 3002
+    return `http://${host}:3002/api/whatsapp`;
 };
 
 export const config = {

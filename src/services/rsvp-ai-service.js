@@ -27,9 +27,10 @@ class RSVPAIService {
      * Analyze a reply text for RSVP intent
      * @param {string} replyText - The text of the reply
      * @param {string} guestName - Name of the guest (optional)
+     * @param {string} lastMessage - The last message sent to the guest (optional)
      * @returns {Promise<Object>} Analysis result
      */
-    async analyzeReply(replyText, guestName = '') {
+    async analyzeReply(replyText, guestName = '', lastMessage = '') {
         if (!process.env.OPENAI_API_KEY) {
             console.warn('[RSVP-AI] ⚠️ API Key missing, using fallback analysis.');
             return this.fallbackAnalysis(replyText);
@@ -41,40 +42,31 @@ class RSVPAIService {
                 console.log(`[RSVP-AI] 🤖 Analyzing with OpenAI (Attempt ${attempt}/${this.maxRetries}): "${replyText}"...`);
 
                 const systemPrompt = `
-أنت خبير في فهم اللهجات السعودية والخليجية لغرض إدارة دعوات المناسبات.
-مهمتك: تصنيف ردود الضيوف بدقة متناهية (High Precision).
+أنت خبير ذكاء اصطناعي متخصص في فهم اللهجات السعودية والخليجية، وتحديداً في سياق دعوات المناسبات الاجتماعية (زواجات، حفلات، اجتماعات).
+مهمتك: تحليل ردود الضيوف وتصنيفها بدقة (تأكيد أو اعتذار) حتى لو كانت مكتوبة بلهجة عامية أو جمل معقدة.
 
-التعليمات الصارمة جداً:
-1. صنف الحالة (status) إلى أحد القيم التالية فقط:
-   - "confirmed": فقط وفقط إذا كان هناك تأكيد صريح وشبه قاطع بالحضور.
-     * أمثلة مؤكدة: "حاضرين", "تم", "يشرفنا", "جاي", "معكم", "باذن الله بنجي", "قدام", "ابشر", "الله يحييك (في سياق الرد ب نعم)".
-   - "declined": رفض صريح أو اعتذار.
-     * أمثلة: "معتذر", "مرتبط", "مسافر", "ما أقدر", "الجايات أكثر", "الله يوفقكم (بدون تأكيد)", "مبروك (بدون تأكيد)".
-   - "inquiry": استفسار عن موقع أو وقت أو تفاصيل.
-     * ملاحظة: "وين الموقع؟" أو "متى العشاء؟" تُصنف inquiry ولا تعتبر موافقة إلا إذا اقترنت بكلمة تأكيد.
-   - "maybe": تردد أو عدم تأكيد.
-     * أمثلة: "بشوف", "يمكن", "أرد لك خبر", "خلها بظروفها".
+التعليمات:
+1. فهم اللهجة: تعرف على الكلمات السعودية مثل "ابشر"، "قدام"، "تم"، "من عيوني" كعلامات للتأكيد. وتعرف على "اعتذر"، "ما اقدر"، "المرة الجاية" كعلامات للاعتذار.
+2. تحليل الأرقام: إذا أرسل العميل رقم "1" (أو ١) في سياق طلب التأكيد، فهو تأكيد. إذا أرسل "2" (أو ٢) فهو اعتذار.
+3. عدد المرافقين: استخرج عدد الأشخاص المرافقين إذا تم ذكرهم (مثلاً: "بجي أنا واثنين معي" تعني إجمالي 3 أشخاص).
+4. التصنيفات (status):
+   - "confirmed": تأكيد الحضور.
+   - "declined": اعتذار عن الحضور.
+   - "maybe": تردد.
+   - "inquiry": سؤال.
 
-2. تحذيرات (Critical):
-   - الدعاء ("الله يوفقهم", "منه المال ومنها العيال", "ألف مبروك") لوحده *ليس* تأكيداً. صنفه "declined" أو null (غير رد) إذا لم يكن فيه اعتذار واضح. لا تصنفه "confirmed" أبداً إلا بوجود كلمة تدل على المجيء.
-   - الرد بـ "👍" أو ملصق مشابه يعتبر "confirmed".
-   - إذا كنت شاكاً ولو بنسبة 1%، لا تعطِ "confirmed". صنفها "inquiry" أو "maybe".
-
-3. الثقة (confidence):
-   - يجب أن تكون الثقة 1.0 (100%) فقط للردود الصريحة جداً.
-   - أي غموض يخفض الثقة تحت 0.8.
-
-المخرج المطلوب (JSON):
+المخرج (JSON فقط):
 {
-  "is_rsvp": true/false (هل لهذا الرد علاقة بالدعوة؟),
+  "is_rsvp": true/false,
   "status": "confirmed" | "declined" | "maybe" | "inquiry" | null,
   "confidence": 0.0 - 1.0,
-  "companion_count": number (استخرج العدد بدقة إذا ذكر، الافتراضي 0),
-  "notes": "الملاحظات",
+  "companion_count": number,
+  "notes": "ملخص الرد",
   "reasoning": "سبب التصنيف"
 }`;
 
                 const userPrompt = `
+آخر رسالة أُرسلت للضيف: "${lastMessage || 'غير متوفرة'}"
 اسم الضيف: ${guestName || 'غير معروف'}
 الرسالة: "${replyText}"
 `;
@@ -86,7 +78,7 @@ class RSVPAIService {
                         { role: "user", content: userPrompt }
                     ],
                     response_format: { type: "json_object" },
-                    temperature: 0.3, // Low temperature for consistent classification
+                    temperature: 0.1, // Even more consistent for classification
                 });
 
                 const content = completion.choices[0].message.content;
@@ -125,18 +117,44 @@ class RSVPAIService {
     fallbackAnalysis(replyText) {
         const text = replyText.toLowerCase();
 
-        const confirmedKeywords = ['نعم', 'حاضر', 'موافق', 'إن شاء الله', 'ان شاء الله', 'أكيد', 'اكيد', 'نحضر', 'حضور', 'تمام', 'تم', 'أبشر', 'ابشر', 'جايين', 'جاي', 'معكم', 'قدام', 'يشرفنا', 'يسعدنا', 'بإذن الله', 'باذن الله'];
-        const declinedKeywords = ['معتذر', 'اعتذر', 'أعتذر', 'آسف', 'للاسف', 'للأسف', 'ما نقدر', 'ما أقدر', 'مانقدر', 'مااقدر', 'صعبة', 'ظروف', 'مرتبط', 'مسافر', 'مشغول'];
-        const maybeKeywords = ['ممكن', 'ربما', 'بشوف', 'اشوف', 'نشوف', 'محتمل', 'احتمال', 'غير متأكد', 'يمكن', 'ارد لكم'];
+        const confirmedKeywords = [
+            'نعم', 'حاضر', 'حاضرين', 'موافق', 'إن شاء الله', 'ان شاء الله', 'أكيد', 'اكيد',
+            'نحضر', 'حضور', 'تمام', 'تم', 'أبشر', 'ابشر', 'جايين', 'جاي', 'جايه',
+            'معكم', 'قدام', 'يشرفنا', 'يسعدنا', 'بإذن الله', 'باذن الله',
+            'أوكي', 'اوكي', 'ok', 'yes', 'يب', 'يس', 'ماشي', 'حياك', 'حياكم',
+            'بنكون', 'بنجي', 'بنحضر', 'موجود', 'موجودين', 'حاضره', 'جايينكم',
+            'هناك', 'بنكون هناك', 'نكون هناك', 'اجي', 'بجي', 'نجي',
+            'على راسي', 'على الراس', 'وعليكم السلام حاضر', 'بكون عندكم',
+            'شرفنا', 'يالله', 'طيب', 'مؤكد', 'متأكد', 'ان شاء الله جاي', 'ابشرو', 'سم', 'تم التاكيد', 'باذن الله جاي'
+        ];
+        const declinedKeywords = [
+            'معتذر', 'معتذره', 'اعتذر', 'أعتذر', 'آسف', 'آسفه', 'للاسف', 'للأسف',
+            'ما نقدر', 'ما أقدر', 'مانقدر', 'مااقدر', 'ما اقدر',
+            'صعبة', 'صعب', 'ظروف', 'مرتبط', 'مسافر', 'مسافره', 'مشغول', 'مشغوله',
+            'ما راح اقدر', 'مقدر', 'ماقدر', 'مو فاضي', 'عندي ارتباط',
+            'ما بقدر', 'مابقدر', 'لا أستطيع', 'عذرا', 'مواعيدي', 'ما يناسبني',
+            'no', 'لا', 'مايمديني', 'ما يمديني', 'مشاغل', 'عندي شغل',
+            'ماحقدر', 'مابحضر', 'ماراح احضر', 'سامحني', 'العذر والسموحة', 'الله يوفقكم'
+        ];
+        const maybeKeywords = [
+            'ممكن', 'ربما', 'بشوف', 'اشوف', 'نشوف', 'محتمل', 'احتمال',
+            'غير متأكد', 'يمكن', 'ارد لكم', 'أرد لكم', 'بأكد لك', 'باكد لك',
+            'خلني اشيك', 'بشيك', 'اتأكد', 'مو متأكد'
+        ];
+
+        // Strict Number Matching
+        const cleanText = text.trim();
+        if (cleanText === '1') return { is_rsvp: true, status: 'confirmed', confidence: 1.0, companion_count: 0, reasoning: 'Explicit number 1 (confirmed)' };
+        if (cleanText === '2') return { is_rsvp: true, status: 'declined', confidence: 1.0, companion_count: 0, reasoning: 'Explicit number 2 (declined)' };
 
         if (confirmedKeywords.some(keyword => text.includes(keyword))) {
-            return { is_rsvp: true, status: 'confirmed', confidence: 0.7, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
+            return { is_rsvp: true, status: 'confirmed', confidence: 0.9, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
         }
         if (declinedKeywords.some(keyword => text.includes(keyword))) {
-            return { is_rsvp: true, status: 'declined', confidence: 0.7, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
+            return { is_rsvp: true, status: 'declined', confidence: 0.9, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
         }
         if (maybeKeywords.some(keyword => text.includes(keyword))) {
-            return { is_rsvp: true, status: 'maybe', confidence: 0.6, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
+            return { is_rsvp: true, status: 'maybe', confidence: 0.8, companion_count: 0, notes: null, reasoning: 'Keyword match (fallback)' };
         }
 
         return { is_rsvp: false, status: null, confidence: 0.5, companion_count: 0, notes: replyText, reasoning: 'No RSVP keywords found' };

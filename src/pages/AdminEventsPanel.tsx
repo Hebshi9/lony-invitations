@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Copy, Palette, Send, Loader2, Search, Edit3, CalendarCheck, Clock, CheckCircle } from 'lucide-react';
+import { Trash2, Settings, Copy, Palette, Send, Loader2, Search, Edit3, CalendarCheck, Clock, CheckCircle } from 'lucide-react';
 import EventManager from './EventManager';
 
 const AdminEventsPanel: React.FC = () => {
@@ -59,6 +59,28 @@ const AdminEventsPanel: React.FC = () => {
 
     const navigateToSender = (eventId: string) => {
         navigate('/whatsapp-sender', { state: { selectedEventId: eventId } });
+    };
+
+    const deleteEvent = async (id: string, name: string) => {
+        if (!window.confirm(`هل أنت متأكد من حذف المناسبة: "${name}"؟ هذا الإجراء سيقوم بحذف جميع الضيوف والرسائل المرتبطة بها.`)) {
+            return;
+        }
+
+        try {
+            setLoading(true);
+            const { error } = await supabase
+                .from('events')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            fetchEvents();
+        } catch (error: any) {
+            console.error('Error deleting event:', error);
+            alert(`حدث خطأ أثناء الحذف: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const filteredEvents = events.filter(e =>
@@ -190,6 +212,14 @@ const AdminEventsPanel: React.FC = () => {
                                     >
                                         <Send className="w-4 h-4 ml-2 text-green-500" />
                                         إرسال واتساب
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1 md:flex-none justify-start border-red-100 text-red-600 hover:bg-red-50"
+                                        onClick={() => deleteEvent(event.id, event.name)}
+                                    >
+                                        <Trash2 className="w-4 h-4 ml-2 text-red-400" />
+                                        حذف المناسبة
                                     </Button>
                                 </div>
                             </div>

@@ -164,7 +164,8 @@ const AnalyticsDashboard: React.FC = () => {
             const report = generateRSVPReport(guests, event);
 
             // إرسال عبر WhatsApp API
-            const response = await fetch('http://localhost:3001/api/whatsapp/send', {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${API_URL}/api/whatsapp/send`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

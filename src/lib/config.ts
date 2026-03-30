@@ -6,17 +6,28 @@
  */
 
 const getApiUrl = () => {
-    // 1. Priority: Defined in .env (Production/Staging)
-    if (import.meta.env.VITE_WHATSAPP_API_URL) {
-        return import.meta.env.VITE_WHATSAPP_API_URL;
+    // 1. Fallback: Localhost or Primary VPS
+    const host = window.location.hostname;
+    
+    // If we are on localhost, use the same host but port 3001
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return `http://${host}:3001/api/whatsapp`;
     }
 
-    // 2. Fallback: Localhost/Network Development
-    // Logic: Use the current window hostname (localhost, 127.0.0.1, or network IP)
-    const host = window.location.hostname || 'localhost';
+    // Default to the proxy when deployed to bypass Mixed Content/CORS
+    return `/api/remote-whatsapp`;
+};
 
-    // In local development, the Evolution API adapter usually lives on port 3002
-    return `http://${host}:3002/api/whatsapp`;
+const getPublicUrl = () => {
+    const host = window.location.hostname;
+    // Local development fallback
+    if (host === 'localhost' || host === '127.0.0.1') {
+        const port = window.location.port === '5173' ? '3001' : window.location.port;
+        return `http://${host}:${port}`;
+    }
+    
+    // Deployment fallback (use relative URL for proxying through Netlify)
+    return '';
 };
 
 export const config = {
@@ -26,6 +37,8 @@ export const config = {
     },
     api: {
         whatsapp: getApiUrl(),
+        sales: '/api/remote-sales',
+        public: getPublicUrl(),
     },
     app: {
         name: 'Lony Invitations',

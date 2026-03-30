@@ -1,19 +1,20 @@
 import React from 'react';
 import {
-    CheckCircle, XCircle, Clock, AlertTriangle, MessageCircle, HelpCircle, RefreshCcw
+    CheckCircle, XCircle, Clock, Send, RefreshCcw
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface GuestTableProps {
     guests: any[];
     onRetry: (guest: any) => void;
+    onDirectSend: (guest: any) => void;
     onOverrideStatus?: (guest: any, newStatus: string) => void;
 }
 
-const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onOverrideStatus }) => {
+const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus }) => {
 
     // Helper to get status icon and color
-    const getStatusInfo = (status: string, phase: string) => {
+    const getStatusInfo = (status: string) => {
         switch (status) {
             case 'sent': return { icon: <CheckCircle className="w-4 h-4" />, color: 'text-green-500', bg: 'bg-green-50', label: 'تم الإرسال' };
             case 'delivered': return { icon: <CheckCircle className="w-4 h-4 fill-green-500 text-white" />, color: 'text-green-600', bg: 'bg-green-100', label: 'وصلت' };
@@ -61,7 +62,7 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onOverrideStat
                             // For simplicity, we assume the guest object passed here already has the latest message status merged or we find it.
                             // UPDATE: The parent component should map guests to include their latest message status.
 
-                            const statusInfo = getStatusInfo(guest.last_message_status || 'pending', guest.last_message_phase);
+                            const statusInfo = getStatusInfo(guest.last_message_status || 'pending');
                             const rsvpInfo = getRSVPInfo(guest.rsvp_status);
 
                             return (
@@ -96,17 +97,29 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onOverrideStat
                                         </div>
                                     </td>
                                     <td className="p-3">
-                                        {guest.last_message_status === 'failed' && (
+                                        <div className="flex items-center gap-2">
+                                            {guest.last_message_status === 'failed' && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => onRetry(guest)}
+                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50 h-7 text-xs"
+                                                >
+                                                    <RefreshCcw className="w-3 h-3 ml-1" />
+                                                    إعادة
+                                                </Button>
+                                            )}
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                onClick={() => onRetry(guest)}
-                                                className="text-red-600 hover:text-red-700 hover:bg-red-50 h-7 text-xs"
+                                                onClick={() => onDirectSend(guest)}
+                                                className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-7 text-xs"
+                                                title="إرسال الدعوة لهذا الضيف فوراً"
                                             >
-                                                <RefreshCcw className="w-3 h-3 ml-1" />
-                                                إعادة
+                                                <Send className="w-3 h-3 ml-1" />
+                                                إرسال مباشر
                                             </Button>
-                                        )}
+                                        </div>
                                     </td>
                                 </tr>
                             );

@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { normalizePin } from '../lib/utils';
 import QRCode from 'react-qr-code';
 import { Button } from '../components/ui/Button';
 import { Check, X, AlertTriangle, MapPin, Calendar, Award, Clock, Lock as LockIcon } from 'lucide-react';
-import { EventFeatures } from '../lib/features';
 
 // Helper to parse date strings safely for Hijri conversion
 const getSafeDate = (dateStr: string | null | undefined) => {
@@ -70,6 +70,7 @@ const CountdownTimer: React.FC<{ targetDate: Date; onExpire?: () => void }> = ({
 
 const GuestVerification: React.FC = () => {
     const { guestId } = useParams<{ guestId: string }>();
+    const navigate = useNavigate();
     const [guest, setGuest] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -80,12 +81,6 @@ const GuestVerification: React.FC = () => {
 
     // Auto Check-in State
     const [autoCheckDone, setAutoCheckDone] = useState(false);
-    const [scanResult, setScanResult] = useState<{
-        success: boolean;
-        message: string;
-        remaining: number;
-        canForce?: boolean;
-    } | null>(null);
     const checkInAttempted = useRef(false);
     const handleCountdownExpire = useCallback(() => setCountdownExpired(true), []);
 
@@ -111,14 +106,39 @@ const GuestVerification: React.FC = () => {
         return () => clearInterval(timer);
     }, [guestId]);
 
-    // Trigger auto check-in when guest data is loaded and user is inspector or HOST
-    useEffect(() => {
-        const activationTime = guest?.events?.qr_active_from;
-        const now = currentTime;
-        const isLocked = guest?.events?.qr_activation_enabled && activationTime && now < new Date(activationTime);
+    // Tracking if the page was opened while still locked
+    const pageLoadedWhenLocked = useRef<boolean | null>(null);
 
-        if ((isInspector || isHostMode) && guest && !checkInAttempted.current && !isLocked) {
+    useEffect(() => {
+        if (guest && pageLoadedWhenLocked.current === null) {
+            const activationTime = getActivationDate(guest?.events?.qr_active_from);
+            const activationEnabled = guest?.events?.qr_activation_enabled === true;
+            pageLoadedWhenLocked.current = !!(activationEnabled && activationTime && new Date() < activationTime);
+        }
+    }, [guest]);
+
+    // Trigger auto check-in when guest data is loaded
+    useEffect(() => {
+        const activationTime = getActivationDate(guest?.events?.qr_active_from);
+        const now = currentTime;
+        const activationEnabled = guest?.events?.qr_activation_enabled === true;
+        
+        // Initial state on load
+        const currentlyLocked = activationEnabled && activationTime && now < activationTime;
+
+        // Safety Guard (User Request):
+        // If the page was initially LOADED while locked, we DO NOT auto check-in 
+        // even if it becomes unlocked later without a refresh.
+        const isPassiveUnlock = pageLoadedWhenLocked.current === true && !currentlyLocked;
+
+        // Auto check-in triggers if:
+        // 1. User is inspector/host (Always)
+        // 2. OR Activation is enabled and time has passed AND it's a fresh scan (not passive)
+        const shouldAutoCheckManual = (isInspector || isHostMode || (activationEnabled && !currentlyLocked && !isPassiveUnlock));
+
+        if (guest && !checkInAttempted.current && shouldAutoCheckManual) {
             checkInAttempted.current = true;
+            
             // For Host Mode: ONLY if Simple Scan is enabled
             if (isHostMode && !guest.events?.enable_simple_scan) {
                 return; // Package doesn't support it
@@ -128,6 +148,46 @@ const GuestVerification: React.FC = () => {
     }, [isInspector, isHostMode, guest, currentTime]);
 
     const fetchGuest = async () => {
+        // --- SIMULATION MODE ---
+        if (guestId?.startsWith('sim-')) {
+            const isBefore = guestId.includes('before');
+            const isExpired = guestId.includes('expired');
+            const now = new Date();
+            
+            const mockEvent = {
+                id: 'sim-event-id',
+                name: 'حفل زفاف تجريبي فاخر',
+                date: now.toISOString().split('T')[0],
+                venue: 'قاعة لوني، الرياض',
+                qr_activation_enabled: true,
+                qr_active_from: isBefore 
+                    ? new Date(now.getTime() + 3600000).toISOString() // 1 hour from now
+                    : new Date(now.getTime() - 3600000).toISOString(), // 1 hour ago
+                qr_active_until: isExpired
+                    ? new Date(now.getTime() - 1800000).toISOString() // 30 mins ago
+                    : new Date(now.getTime() + 86400000).toISOString(),
+                enable_simple_scan: true,
+                host_pin: '1234'
+            };
+
+            const mockGuest = {
+                id: 'sim-guest-id',
+                name: 'ضيف تجريبي (Simulation)',
+                status: 'confirmed',
+                qr_token: guestId,
+                companions_count: 2,
+                scan_count: 0,
+                events: mockEvent
+            };
+
+            setTimeout(() => {
+                setGuest(mockGuest);
+                setRsvpStatus(mockGuest.status);
+                setLoading(false);
+            }, 500);
+            return;
+        }
+
         try {
             const { data, error } = await supabase
                 .from('guests')
@@ -151,79 +211,34 @@ const GuestVerification: React.FC = () => {
         try {
             const activationTime = getActivationDate(guest.events?.qr_active_from);
             const activationEnabled = guest.events?.qr_activation_enabled === true;
-            // STAFF (Inspector/Host) can ALWAYS check in
+            
+            // Check Lock (unless inspector)
             if (!isInspector && !isHostMode && activationEnabled && activationTime && currentTime < activationTime && !force) {
-                const target = activationTime;
-                setScanResult({
-                    success: false,
-                    message: `يبدأ الدخول في: ${target.toLocaleDateString('ar-SA')} - ${target.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}`,
-                    remaining: 0
-                });
-                setAutoCheckDone(true);
-                return;
+                return; // Still restricted
             }
 
+            // Perform check-in (already existing logic...)
             const totalAllowed = 1 + (guest.companions_count || 0);
             const alreadyScanned = guest.scan_count || 0;
             const remaining = totalAllowed - alreadyScanned;
 
-            // 2. Check Limits (unless forced)
-            if (remaining <= 0 && !force) {
-                setScanResult({
-                    success: false,
-                    message: 'تم استخدام هذه الدعوة بالكامل مسبقاً',
-                    remaining: 0,
-                    canForce: true
-                });
-                setAutoCheckDone(true);
-                return;
+            if (remaining > 0 || force) {
+                const newCount = alreadyScanned + 1;
+                const { error } = await supabase
+                    .from('guests')
+                    .update({ status: 'attended', scan_count: newCount })
+                    .eq('id', guest.id);
+                if (error) throw error;
             }
 
-            // Perform Check-in
-            const newCount = alreadyScanned + 1;
-            const newRemaining = force ? 0 : totalAllowed - newCount;
-
-            const updateData: any = {
-                status: 'attended',
-                scan_count: newCount
-            };
-
-            if (force) {
-                updateData.notes = (guest.notes || '') + `\n[${new Date().toISOString()}] Forced Entry by Inspector`;
-            }
-
-            const { error } = await supabase
-                .from('guests')
-                .update(updateData)
-                .eq('id', guest.id);
-
-            if (error) throw error;
-
-            // Refresh guest data
-            const { data: updatedGuest } = await supabase
-                .from('guests')
-                .select('*')
-                .eq('id', guest.id)
-                .single();
-
-            if (updatedGuest) setGuest({ ...guest, ...updatedGuest });
-
-            setScanResult({
-                success: true,
-                message: force ? 'تم تسجيل الدخول القسري بنجاح' : 'تم تسجيل الدخول بنجاح',
-                remaining: updatedGuest ? (1 + (updatedGuest.companions_count || 0) - (updatedGuest.scan_count || 0)) : newRemaining
-            });
-
-            setAutoCheckDone(true);
+            // REDIRECT to the standard Full Invitation view
+            // This is "Our one without restriction" as requested by the user
+            navigate(`/v/${guest.qr_token}`, { replace: true });
 
         } catch (err) {
             console.error(err);
-            setScanResult({
-                success: false,
-                message: 'حدث خطأ في النظام',
-                remaining: 0
-            });
-            setAutoCheckDone(true);
+            // On error, still try to show the dashboard
+            navigate(`/v/${guest.qr_token}`, { replace: true });
         }
     };
 
@@ -300,76 +315,6 @@ const GuestVerification: React.FC = () => {
     const guestConfirmed = rsvpStatus === 'confirmed' || rsvpStatus === 'attended';
     const isEntryOpen = isEventActive && !isEventExpired && !autoCheckDone && guestConfirmed;
 
-    // ------------------------------------------------------------------
-    // HOST MODE VIEW
-    // ------------------------------------------------------------------
-    if (isHostMode && autoCheckDone) {
-        const isSuccess = scanResult?.success;
-        return (
-            <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-6 relative overflow-hidden" dir="rtl">
-                <div className="absolute top-0 right-0 p-4 z-50">
-                    <Button
-                        variant="ghost"
-                        onClick={() => {
-                            localStorage.removeItem('lony_host_mode');
-                            window.location.reload();
-                        }}
-                        className="text-gray-500 hover:text-[#2C3E50] text-xs"
-                    >
-                        تسجيل خروج (Staff)
-                    </Button>
-                </div>
-
-                <div className={`w-full max-w-sm rounded-[3rem] p-1 transition-all duration-700 ${isSuccess ? 'bg-gradient-to-tr from-[#8FA08E] to-[#6C7E6B]' : 'bg-gradient-to-tr from-[#B57382] to-[#915664]'} shadow-xl`}>
-                    <div className="bg-[#FDFBF7] rounded-[2.9rem] overflow-hidden">
-                        <div className={`h-56 flex flex-col items-center justify-center relative ${isSuccess ? 'bg-[#8FA08E]/10' : 'bg-[#B57382]/10'}`}>
-                            {isSuccess ? <Check className="w-28 h-28 text-[#8FA08E] mb-4 z-10" /> : <X className="w-28 h-28 text-[#B57382] mb-4 z-10" />}
-                            <h2 className={`text-4xl font-black font-serif z-10 ${isSuccess ? 'text-[#8FA08E]' : 'text-[#B57382]'}`}>
-                                {isSuccess ? 'تم التحقق' : 'مرفوض'}
-                            </h2>
-                        </div>
-
-                        <div className="p-10 text-center space-y-8 bg-white border-t border-[#E5DCC5]">
-                            <div>
-                                <p className="text-gray-500 text-xs mb-2 uppercase font-black tracking-widest">الاسم الكامل</p>
-                                <h3 className="text-3xl font-black font-serif text-[#2C3E50] leading-tight">{guest.name}</h3>
-                            </div>
-
-                            <div className="bg-[#FDFBF7] rounded-2xl p-6 border border-[#E5DCC5]">
-                                <p className={`font-bold transition-all ${isSuccess ? 'text-[#8FA08E]' : 'text-[#B57382]'}`}>
-                                    {scanResult?.message}
-                                </p>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E5DCC5]">
-                                    <p className="text-gray-500 text-[10px] mb-1 font-black uppercase tracking-tighter">المتبقي</p>
-                                    <p className="text-3xl font-black text-[#C5A059]">{scanResult?.remaining}</p>
-                                </div>
-                                <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E5DCC5]">
-                                    <p className="text-gray-500 text-[10px] mb-1 font-black uppercase tracking-tighter">الحالة</p>
-                                    <p className="text-xl font-black text-[#2C3E50]">{guest.table_no || 'VIP'}</p>
-                                </div>
-                            </div>
-
-                            {!isSuccess && (
-                                <Button
-                                    onClick={() => performAutoCheckIn(true)}
-                                    className="w-full bg-[#B57382] hover:bg-[#915664] text-white font-black py-4 rounded-2xl h-auto"
-                                >
-                                    دخول إجباري (Force)
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mt-10">
-                    <p className="text-gray-400 text-xs animate-pulse tracking-widest font-black uppercase">SCANNER READY FOR NEXT GUEST</p>
-                </div>
-            </div>
-        );
-    }
 
     // ------------------------------------------------------------------
     // WAIT / COUNTDOWN VIEW (When locked — event hasn't started yet)
@@ -446,6 +391,8 @@ const GuestVerification: React.FC = () => {
                             <input
                                 autoFocus
                                 type="password"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 placeholder="PIN"
                                 className="w-full text-center text-5xl tracking-[10px] bg-black/40 border-2 border-white/5 rounded-[2rem] p-6 text-[#D4AF37] outline-none focus:border-[#D4AF37]/50 transition-all font-mono"
                                 maxLength={4}
@@ -456,7 +403,7 @@ const GuestVerification: React.FC = () => {
                                 <Button variant="ghost" onClick={() => setShowHostLogin(false)} className="text-gray-500 py-6 rounded-2xl">إلغاء</Button>
                                 <Button
                                     onClick={() => {
-                                        if (guest?.events?.host_pin === hostPinInput) {
+                                        if (String(guest?.events?.host_pin).trim() === String(hostPinInput).trim()) {
                                             localStorage.setItem('lony_host_mode', 'true');
                                             setIsHostMode(true);
                                             setShowHostLogin(false);
@@ -538,129 +485,41 @@ const GuestVerification: React.FC = () => {
     }
 
     // ------------------------------------------------------------------
-    // ENTRY OPEN VIEW — event started, confirmed guest opens link (no scan yet)
-    // Shows: glowing QR + "Entry Now Open" — no countdown, no lock
+    // ENTRY PROCESSING VIEW — Scan was successful and system is redirecting.
     // ------------------------------------------------------------------
     if (isEntryOpen) {
-        return (
-            <div
-                className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6 relative overflow-hidden"
-                dir="rtl"
-            >
-                {/* Gold ambient glow */}
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(197,160,89,0.08)_0%,_transparent_70%)] pointer-events-none" />
-                <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none" />
-
-                <div className="relative z-10 w-full max-w-sm flex flex-col items-center gap-8">
-
-                    {/* Status badge */}
-                    <div className="flex items-center gap-3 bg-[#8FA08E]/10 border border-[#8FA08E]/30 rounded-full px-6 py-3 shadow-sm">
-                        <span className="relative flex h-3 w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8FA08E] opacity-75" />
-                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#6C7E6B]" />
-                        </span>
-                        <p className="text-[#5C6E5B] font-black font-serif tracking-widest uppercase">الدخول مفتوح الآن</p>
-                    </div>
-
-                    {/* Guest name */}
-                    <div className="text-center">
-                        <p className="text-gray-500 text-xs uppercase tracking-[0.4em] font-black mb-2">ضيفنا المميز</p>
-                        <h1 className="text-4xl font-black font-serif text-[#2C3E50]">{guest.name}</h1>
-                    </div>
-
-                    {/* QR Code */}
-                    <div className="relative group">
-                        {/* Outer glow ring */}
-                        <div className="absolute -inset-4 bg-[#C5A059]/20 rounded-[2.5rem] blur-xl opacity-60 animate-pulse" />
-                        <div className="absolute -inset-1 bg-gradient-to-tr from-[#C5A059]/40 to-[#D4AF37]/40 rounded-[2rem]" />
-                        <div className="relative bg-white p-5 rounded-[1.8rem] shadow-xl border border-[#E5DCC5]/50">
-                            <QRCode
-                                value={`${window.location.origin}/verify/${guest.qr_token}`}
-                                size={200}
-                                bgColor="#ffffff"
-                                fgColor="#2C3E50"
-                                level="Q"
-                            />
+        // CASE: Passive Unlock (User left page open)
+        // Show a message to RE-SCAN instead of auto-checkin.
+        if (pageLoadedWhenLocked.current === true) {
+            return (
+                <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6" dir="rtl">
+                    <div className="max-w-sm w-full text-center bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] p-10 shadow-xl">
+                        <div className="inline-flex items-center justify-center w-20 h-20 bg-[#C5A059]/10 rounded-2xl mb-8">
+                            <Clock className="w-12 h-12 text-[#C5A059]" />
                         </div>
+                        <h1 className="text-3xl font-black font-serif text-[#2C3E50] mb-4">الدخول متاح الآن</h1>
+                        <p className="text-gray-500 text-lg leading-relaxed mb-8">يرجى مسح الباركود الخاص بك من بطاقة الدعوة مجدداً لإكمال عملية الدخول.</p>
+                        <Button 
+                            onClick={() => window.location.reload()}
+                            className="w-full bg-[#C5A059] text-white py-4 rounded-2xl font-black"
+                        >
+                            تحديث الصفحة
+                        </Button>
                     </div>
-
-                    {/* Instruction */}
-                    <div className="text-center space-y-1">
-                        <p className="text-[#C5A059] font-black text-xs tracking-[0.3em] uppercase">اعرض هذا الرمز عند المدخل</p>
-                        <p className="text-gray-500 text-[10px]">سيتم تسجيل دخولك تلقائياً عند المسح</p>
-                    </div>
-
-                    {/* Event info */}
-                    <div className="w-full bg-white/80 border border-[#E5DCC5] shadow-sm rounded-3xl p-6 space-y-3">
-                        <div className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 text-gray-500">
-                                <Calendar className="w-4 h-4 text-[#8FA08E]" />
-                                <span>{guest.events?.date}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-gray-500">
-                                <MapPin className="w-4 h-4 text-[#B57382]" />
-                                <span>{guest.events?.venue}</span>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-[#E5DCC5]">
-                            <div className="text-center">
-                                <p className="text-[10px] text-gray-500 font-black mb-1">رقم الطاولة</p>
-                                <p className="text-xl font-black font-serif text-[#C5A059]">{guest.table_no || 'VIP'}</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-[10px] text-gray-500 font-black mb-1">عدد المقاعد</p>
-                                <p className="text-xl font-black font-serif text-[#2C3E50]">{1 + (guest.companions_count || 0)}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Staff access */}
-                    <button
-                        onClick={() => setShowHostLogin(true)}
-                        className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors uppercase font-black tracking-widest"
-                    >
-                        Staff Access
-                    </button>
                 </div>
+            );
+        }
 
-                {/* Staff Login Modal */}
-                {showHostLogin && (
-                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-                        <div className="bg-[#FDFBF7] p-10 rounded-[3rem] w-full max-w-xs border border-[#E5DCC5] text-center space-y-10 animate-in zoom-in duration-300 shadow-2xl">
-                            <div className="space-y-2">
-                                <h3 className="text-2xl font-black font-serif text-[#2C3E50]">Inspector Access</h3>
-                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Enter Staff PIN</p>
-                            </div>
-                            <input
-                                autoFocus
-                                type="password"
-                                placeholder="PIN"
-                                className="w-full text-center text-5xl tracking-[12px] bg-white border-2 border-[#E5DCC5] rounded-[2.5rem] p-8 text-[#C5A059] outline-none focus:border-[#C5A059]/50 transition-all font-mono shadow-sm"
-                                maxLength={4}
-                                value={hostPinInput}
-                                onChange={e => setHostPinInput(e.target.value)}
-                            />
-                            <div className="grid grid-cols-2 gap-4">
-                                <Button variant="ghost" onClick={() => setShowHostLogin(false)} className="text-gray-500 font-bold hover:bg-gray-100">CANCEL</Button>
-                                <Button
-                                    onClick={() => {
-                                        if (guest?.events?.host_pin === hostPinInput) {
-                                            localStorage.setItem('lony_host_mode', 'true');
-                                            setIsHostMode(true);
-                                            setShowHostLogin(false);
-                                            window.location.reload();
-                                        } else {
-                                            alert('Invalid PIN');
-                                        }
-                                    }}
-                                    className="bg-[#C5A059] hover:bg-[#D4AF37] text-white font-black py-4 rounded-2xl"
-                                >
-                                    VERIFY
-                                </Button>
-                            </div>
-                        </div>
+        // CASE: Fresh Scan (Redirecting)
+        return (
+            <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6" dir="rtl">
+                <div className="text-center space-y-8 animate-pulse">
+                    <div className="w-20 h-20 border-4 border-[#C5A059]/20 border-t-[#C5A059] rounded-full animate-spin mx-auto"></div>
+                    <div>
+                        <h1 className="text-2xl font-black font-serif mb-2">جاري معالجة الدخول...</h1>
+                        <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">LONY INVITATIONS</p>
                     </div>
-                )}
+                </div>
             </div>
         );
     }
@@ -804,7 +663,7 @@ const GuestVerification: React.FC = () => {
                             <Button variant="ghost" onClick={() => setShowHostLogin(false)} className="text-gray-500 font-bold hover:bg-gray-100">CANCEL</Button>
                             <Button
                                 onClick={() => {
-                                    if (guest?.events?.host_pin === hostPinInput) {
+                                    if (normalizePin(guest?.events?.host_pin) === normalizePin(hostPinInput)) {
                                         localStorage.setItem('lony_host_mode', 'true');
                                         setIsHostMode(true);
                                         setShowHostLogin(false);

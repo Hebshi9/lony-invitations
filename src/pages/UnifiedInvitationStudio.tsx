@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { hasFeature } from '../lib/features';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2, Loader2, AlertTriangle, LinkIcon, Info } from 'lucide-react';
+import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import * as QRCode from 'qrcode';
 import JSZip from 'jszip';
@@ -53,6 +54,7 @@ interface DesignElement {
     qrCenterImage?: string; // URL for center logo
     colorDark?: string;
     colorLight?: string;
+    showIfZero?: boolean; // New: Show element even if value is 0
 }
 
 const CANVAS_WIDTH = 1080;
@@ -148,7 +150,7 @@ function UnifiedInvitationStudioContent() {
     const selectedElement = elements.find(el => el.id === selectedId);
 
     // --- Load Events ---
-    const [eventsList, setEventsList] = useState<{ id: string, name: string, date: string, features?: any }[]>([]);
+    const [eventsList, setEventsList] = useState<{ id: string, name: string, date: string, features?: any, host_pin?: string }[]>([]);
 
     const getCanvasBlob = (canvas: HTMLCanvasElement): Promise<Blob | null> => {
         return new Promise((resolve) => {
@@ -172,7 +174,7 @@ function UnifiedInvitationStudioContent() {
 
     useEffect(() => {
         const fetchEvents = async () => {
-            const { data } = await supabase.from('events').select('id, name, date, features').order('date', { ascending: false });
+            const { data } = await supabase.from('events').select('id, name, date, features, host_pin').order('date', { ascending: false });
             if (data) {
                 setEventsList(data);
                 // Auto-select first event
@@ -207,7 +209,7 @@ function UnifiedInvitationStudioContent() {
         // Find existing event name if needed, but we mainly want features
         // const eventName = eventsList.find(e => e.id === eventId)?.name;
         // We might need to fetch fresh if eventsList is stale, but let's try logic:
-        const { data: eventFresh } = await supabase.from('events').select('features').eq('id', eventId).single();
+        const { data: eventFresh } = await supabase.from('events').select('features, host_pin').eq('id', eventId).single();
 
         if (eventFresh?.features?.design_config) {
             const config = eventFresh.features.design_config;
@@ -407,14 +409,61 @@ function UnifiedInvitationStudioContent() {
     };
 
     // --- Save Logic ---
-    const saveDesign = async () => {
-        if (!selectedEventId) return alert("اختر حدثاً أولاً لحفظ التصميم له");
+    const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-        setSaving(true);
+    const saveDesign = async (silent: boolean = false) => {
+        if (!selectedEventId) {
+            if (!silent) alert("اختر حدثاً أولاً لحفظ التصميم له");
+            return;
+        }
+
+        if (!silent) setSaving(true);
+        setAutoSaveStatus('saving');
+
         try {
+            let bgUrlToSave = backgroundImage;
+
+            // If background is base64, upload to Supabase Storage first
+            if (backgroundImage && backgroundImage.startsWith('data:')) {
+                const base64Data = backgroundImage.split(',')[1];
+                const byteString = atob(base64Data);
+                const ab = new ArrayBuffer(byteString.length);
+                const ia = new Uint8Array(ab);
+                for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+
+                const mimeMatch = backgroundImage.match(/data:([^;]+);/);
+                const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                const ext = mime.includes('png') ? 'png' : 'jpg';
+                const blob = new Blob([ab], { type: mime });
+
+                const fileName = `designs/${selectedEventId}/background.${ext}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('invitation-cards')
+                    .upload(fileName, blob, { upsert: true, contentType: mime });
+
+                if (!uploadError) {
+                    const { data: { publicUrl } } = supabase.storage.from('invitation-cards').getPublicUrl(fileName);
+                    bgUrlToSave = publicUrl;
+                    // Update local state with the URL instead of base64
+                    setBackgroundImage(publicUrl);
+                } else {
+                    // Fallback: try 'invitations' bucket
+                    const { error: uploadError2 } = await supabase.storage
+                        .from('invitations')
+                        .upload(fileName, blob, { upsert: true, contentType: mime });
+                    if (!uploadError2) {
+                        const { data: { publicUrl } } = supabase.storage.from('invitations').getPublicUrl(fileName);
+                        bgUrlToSave = publicUrl;
+                        setBackgroundImage(publicUrl);
+                    }
+                    // If both fail, save base64 as fallback
+                }
+            }
+
             const designConfig = {
                 elements: elements,
-                backgroundUrl: backgroundImage
+                backgroundUrl: bgUrlToSave,
+                savedAt: new Date().toISOString()
             };
 
             const { data: currentEvent, error: fetchError } = await supabase
@@ -436,15 +485,45 @@ function UnifiedInvitationStudioContent() {
                 .eq('id', selectedEventId);
 
             if (error) throw error;
-            alert("تم حفظ قالب التصميم بنجاح! سيتم استخدامه لجميع الضيوف.");
+
+            setAutoSaveStatus('saved');
+            if (!silent) alert("تم حفظ قالب التصميم بنجاح! سيتم استخدامه لجميع الضيوف.");
+
+            // Reset status after 3 seconds
+            setTimeout(() => setAutoSaveStatus('idle'), 3000);
 
         } catch (e: any) {
             console.error(e);
-            alert("فشل الحفظ: " + e.message);
+            setAutoSaveStatus('error');
+            if (!silent) alert("فشل الحفظ: " + e.message);
         } finally {
-            setSaving(false);
+            if (!silent) setSaving(false);
         }
     };
+
+    // --- Auto-Save: Save design automatically when elements or background change ---
+    const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const isInitialLoad = useRef(true);
+
+    useEffect(() => {
+        // Skip auto-save on initial load
+        if (isInitialLoad.current) {
+            isInitialLoad.current = false;
+            return;
+        }
+        // Skip if no event selected
+        if (!selectedEventId) return;
+
+        // Debounce: save after 3 seconds of no changes
+        if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = setTimeout(() => {
+            saveDesign(true); // silent auto-save
+        }, 3000);
+
+        return () => {
+            if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        };
+    }, [elements, backgroundImage, selectedEventId]);
 
     // --- Bulk Generation Logic ---
     const generateAllCards = async () => {
@@ -455,7 +534,7 @@ function UnifiedInvitationStudioContent() {
         if (!confirm) return;
 
         setGenerating(true);
-        setProgress({ current: 0, total: guests.length, failed: 0, lastError: "جاري إنشاء المعاينة..." });
+        setProgress({ current: 0, total: guests.length, failed: 0, lastError: "جاري إنشاء المعاينة...", logs: [] });
 
         // Helper to convert canvas to blob
         const getCanvasBlob = (canvas: HTMLCanvasElement): Promise<Blob> => {
@@ -883,9 +962,13 @@ function UnifiedInvitationStudioContent() {
 
             if (successCount > 0) {
                 setProgress(p => ({ ...p, lastError: "جاري ضغط الملفات وتحميل الـ ZIP..." }));
-                const content = await zip.generateAsync({ type: "blob" });
+                const content = await zip.generateAsync({ 
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: { level: 6 }
+                });
                 saveAs(content, "invitations_bulk_" + new Date().toISOString().slice(0, 10) + ".zip");
-                setProgress(p => ({ ...p, lastError: "اكتمل التحميل بنجاح!" }));
+                setProgress(p => ({ ...p, lastError: `اكتمل تحميل ${successCount} بطاقة بنجاح!` }));
             } else {
                 alert("لم يتم توليد أي بطاقات بنجاح.");
             }
@@ -1054,6 +1137,15 @@ function UnifiedInvitationStudioContent() {
                         .replace('{serial}', '001');
                 }
 
+                // CHECK IF ZERO LOGIC
+                // If it's the companions field and value is 0, and showIfZero is false, hide it
+                if (el.text?.includes('companions') || el.text?.includes('المرافقين')) {
+                    const value = targetGuest?.companions_count ?? 0;
+                    if (value === 0 && !el.showIfZero) {
+                        continue; // Skip drawing this element
+                    }
+                }
+
                 // ADD PREFIX & SUFFIX
                 if (el.prefix) {
                     text = el.prefix + " " + text;
@@ -1086,8 +1178,16 @@ function UnifiedInvitationStudioContent() {
                     // LINKING QR TO NETLIFY
                     // Use custom URL pattern or default
                     // Build verify URL
-                    // USE OFFICIAL STATIC CHECK-IN PAGE: This has the specific countdown and states agreed on.
-                    const defaultUrl = 'https://lonyinvit.netlify.app/check-in.html?token={token}';
+                    
+                    // SMART GATEWAY: If PIN is enabled, use the SECURE path (/s/:token)
+                    // Otherwise, use the legacy check-in.html path for 100% backward compatibility
+                    const currentEvent = eventsList.find(e => e.id === selectedEventId);
+                    const isPinEnabled = currentEvent && hasFeature(currentEvent, 'enable_host_pin') && currentEvent?.host_pin;
+                    
+                    const defaultUrl = isPinEnabled 
+                        ? 'https://lonyinvit.netlify.app/s/{token}'
+                        : 'https://lonyinvit.netlify.app/check-in.html?token={token}';
+                        
                     const baseUrl = (el as any).qrUrl && (el as any).qrUrl.trim() ? (el as any).qrUrl : defaultUrl;
                     const qrContent = baseUrl.replace('{token}', targetGuest.qr_token || targetGuest.id || '');
 
@@ -1257,16 +1357,31 @@ function UnifiedInvitationStudioContent() {
     const downloadCard = async () => {
         if (!currentGuest) return;
 
-        // Render a clean version first
-        await renderCanvas(currentGuest, true);
+        try {
+            // Render a clean version first
+            await renderCanvas(currentGuest, true);
 
-        const link = document.createElement('a');
-        link.download = "invite_" + (currentGuest?.name || 'card') + ".png";
-        link.href = canvasRef.current!.toDataURL('image/png');
-        link.click();
+            const canvas = canvasRef.current;
+            if (!canvas) throw new Error("Canvas not found");
 
-        // Restore view to include selection markers if needed
-        renderCanvas();
+            const dataUrl = canvas.toDataURL('image/png');
+            
+            const link = document.createElement('a');
+            link.download = "invite_" + (currentGuest?.name || 'card').replace(/\s+/g, '_') + ".png";
+            link.href = dataUrl;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                document.body.removeChild(link);
+            }, 100);
+
+            // Restore view
+            renderCanvas();
+        } catch (error: any) {
+            console.error("Download error:", error);
+            alert("فشل تحميل الصورة. قد يكون السبب متعلقاً بإعدادات الأمان في المتصفح.");
+        }
     };
 
     return (
@@ -1307,8 +1422,11 @@ function UnifiedInvitationStudioContent() {
                                 </Button>
                             </div>
                         </div>
-                        <Button onClick={saveDesign} disabled={!selectedEventId} className="w-full bg-lony-navy hover:bg-lony-navy/90 text-white">
+                        <Button onClick={() => saveDesign()} disabled={!selectedEventId} className="w-full bg-lony-navy hover:bg-lony-navy/90 text-white relative">
                             <Save className="w-4 h-4 ml-2" /> حفظ التصميم للجميع
+                            {autoSaveStatus === 'saving' && <span className="absolute left-2 text-[10px] text-white/70 animate-pulse">جاري الحفظ تلقائياً...</span>}
+                            {autoSaveStatus === 'saved' && <span className="absolute left-2 text-[10px] text-green-300">تم الحفظ ✓</span>}
+                            {autoSaveStatus === 'error' && <span className="absolute left-2 text-[10px] text-red-300">خطأ بالحفظ ❌</span>}
                         </Button>
 
                         {/* BULK GENERATE BUTTON */}
@@ -1684,6 +1802,29 @@ function UnifiedInvitationStudioContent() {
                                                                 </div>
                                                             </div>
                                                         </div>
+
+                                                        {/* Show if Zero Toggle */}
+                                                        <div className="mt-4 pt-4 border-t border-gray-100">
+                                                            <div className="text-xs font-bold text-gray-600 mb-3 border-b pb-1">إعدادات الإظهار</div>
+                                                            <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-amber-200 transition-colors">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-xs font-bold text-gray-700">إظهار إذا كان صفر</span>
+                                                                    <span className="text-[9px] text-gray-400 mt-0.5">للمرافقين وغيرهم — إذا كان العدد 0 هل تظهر هذا الحقل؟</span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => updateElement('showIfZero', !selectedElement.showIfZero)}
+                                                                    className={`w-11 h-6 rounded-full transition-all duration-200 relative flex-shrink-0 ml-3 shadow-inner ${selectedElement.showIfZero ? 'bg-amber-500' : 'bg-gray-300'}`}
+                                                                >
+                                                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all duration-200 ${selectedElement.showIfZero ? 'right-1' : 'left-1'}`} />
+                                                                </button>
+                                                            </div>
+                                                            <p className="text-[9px] text-gray-400 mt-1.5 pr-1">
+                                                                {selectedElement.showIfZero
+                                                                    ? '✅ سيظهر الحقل حتى لو كانت القيمة صفر'
+                                                                    : '🚫 سيتم إخفاء الحقل إذا كانت القيمة صفر (الافتراضي)'}
+                                                            </p>
+                                                        </div>
+
                                                     </div>
                                                 )}
                                             </>

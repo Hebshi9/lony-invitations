@@ -211,7 +211,8 @@ export default function InvitationStudio() {
             // 3. Trigger Backend
             // Assuming the backend acts as a microservice on a different port or same domain/api
             // Adjust URL based on where agent-dist is running (likely localhost:3001 or via proxy)
-            const response = await fetch('http://localhost:3001/api/campaign/start', {
+            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            const response = await fetch(`${API_URL}/api/campaign/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ campaignId: campaign.id })
@@ -288,9 +289,30 @@ export default function InvitationStudio() {
             {/* Properties Panel (Right) - Simplified */}
             {selectedObject && (
                 <div className="w-64 bg-white p-4 border-l">
-                    <h3 className="font-bold mb-4">Properties</h3>
-                    <p className="text-sm text-gray-500">Selected: {selectedObject.type}</p>
-                    {/* Add color/font controls here later */}
+                    <h3 className="font-bold mb-4 italic text-sm text-indigo-600">خصائص العنصر</h3>
+                    <p className="text-[10px] text-gray-500 mb-4">النوع: {selectedObject.type}</p>
+                    
+                    {selectedObject.type === 'i-text' && (
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-gray-700">إظهار إذا كان 0</span>
+                                    <span className="text-[9px] text-gray-400">للمرافقين وغيرهم</span>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        const current = (selectedObject as any).showIfZero || false;
+                                        selectedObject.set('showIfZero', !current);
+                                        fabricCanvas?.renderAll();
+                                        setSelectedObject({...selectedObject}); // Force re-render of panel
+                                    }}
+                                    className={`w-10 h-5 rounded-full transition-colors relative ${(selectedObject as any).showIfZero ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                                >
+                                    <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-transform ${(selectedObject as any).showIfZero ? 'right-1' : 'left-1'}`} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-    Send, Play, Square,
-    RefreshCw, Settings,
-    Bot, CheckCircle, User, Zap, Clock, Shield,
-    Sparkles, Loader2
+    CheckCircle, User, RefreshCw, Send, Loader2, RotateCcw,
+    AlertTriangle, Mail, MailCheck, Eye, Bot, Sparkles,
+    Variable, Palette, Layout, Settings, Share2, Copy,
+    Zap, Clock, Shield, Upload, Trash2, Image as ImageIcon,
+    Play, Square
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { supabase } from '../lib/supabaseClient';
@@ -92,16 +93,31 @@ export default function WhatsAppSender() {
 
     // Editor & Campaign
     const [messageTemplate, setMessageTemplate] = useState('');
+    const [globalImageUrl, setGlobalImageUrl] = useState(''); // New: Global Invite Image
+    const [autoFollowup, setAutoFollowup] = useState(true); // New: Toggle for automated card delivery
+    const [clientPhone, setClientPhone] = useState(''); // Owner's WhatsApp for RSVP notifications
+    const [isDirectSend, setIsDirectSend] = useState(false); // New: Direct Send status
     const [campaignType, setCampaignType] = useState<'invite' | 'qr_code' | 'reminder'>('invite');
     const [sendingSpeed, setSendingSpeed] = useState<'safe' | 'balanced' | 'fast'>('balanced');
     const [useButtons, setUseButtons] = useState(true);
     const [aiGenerating, setAiGenerating] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
 
     // Queue Status
     const [queueStatus, setQueueStatus] = useState<any>({
         isRunning: false, isPaused: false, progress: 0, total: 0
     });
     const [logs, setLogs] = useState<string[]>([]);
+
+    // Delivery tracking
+    const [deliveryStats, setDeliveryStats] = useState({ sent: 0, delivered: 0, read: 0, failed: 0, total: 0 });
+    const [retrying, setRetrying] = useState(false);
+
+    // Demo State
+    const [activeTab, setActiveTab] = useState<'campaign' | 'demo'>('campaign');
+    const [demoPhones, setDemoPhones] = useState('');
+    const [demoImageUrl, setDemoImageUrl] = useState('');
+    const [demoSending, setDemoSending] = useState(false);
 
     // Refs
     const logContainerRef = useRef<HTMLDivElement>(null);
@@ -168,7 +184,7 @@ export default function WhatsAppSender() {
             .select(`
                 id, name, phone, rsvp_status, rsvp_at,
                 whatsapp_messages (
-                    status, message_phase, created_at
+                    status, delivery_status, message_phase, created_at
                 )
             `)
             .eq('event_id', eventId)
@@ -180,19 +196,35 @@ export default function WhatsAppSender() {
             return;
         }
 
-        const processed = guestsData.map(g => {
-            const msgs = g.whatsapp_messages || [];
-            msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            const latest = msgs[0];
-            return {
-                ...g,
-                last_message_status: latest?.status || 'pending',
-                last_message_phase: latest?.message_phase,
-                last_interaction: latest?.created_at
-            };
-        });
+        const processed = guestsData
+            .filter(g => {
+                const name = (g.name || '').toLowerCase();
+                const phone = (g.phone || '');
+                const isSample = name.includes('عينة') || name.includes('sample') || phone.includes('000000');
+                return !isSample;
+            })
+            .map(g => {
+                const msgs = g.whatsapp_messages || [];
+                msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                const latest = msgs[0];
+                return {
+                    ...g,
+                    last_message_status: latest?.status || 'pending',
+                    delivery_status: latest?.delivery_status || null,
+                    last_message_phase: latest?.message_phase,
+                    last_interaction: latest?.created_at
+                };
+            });
 
         setGuests(processed);
+
+        // Fetch delivery stats
+        try {
+            const dsRes = await fetch(`${API_URL}/delivery-stats/${eventId}`);
+            const dsData = await dsRes.json();
+            if (dsData.success) setDeliveryStats(dsData.stats);
+        } catch (e) { /* ignore */ }
+
         setLoadingGuests(false);
     };
 
@@ -227,7 +259,8 @@ export default function WhatsAppSender() {
                 body: JSON.stringify({
                     eventId: selectedEventId,
                     context: messageTemplate, // Send current text as context for polishing
-                    tone: 'formal'
+                    tone: 'formal',
+                    imageUrl: globalImageUrl // Pass image for Vision analysis
                 })
             });
 
@@ -260,7 +293,8 @@ export default function WhatsAppSender() {
                     eventId: selectedEventId,
                     template: messageTemplate,
                     messagePhase: campaignType, // sent as 'invite' or 'qr_code'
-                    filters: { rsvp_status: campaignType === 'qr_code' ? 'confirmed' : 'all' }
+                    filters: { rsvp_status: campaignType === 'qr_code' ? 'confirmed' : 'all' },
+                    globalImageUrl: globalImageUrl || null // New: Pass global image override
                 })
             });
             const prep = await prepRes.json();
@@ -278,7 +312,8 @@ export default function WhatsAppSender() {
                     eventId: selectedEventId,
                     mode: sendingSpeed, // 'fast', 'balanced', 'safe'
                     useButtons: useButtons,
-                    accountId: selectedAccountId
+                    accountId: selectedAccountId,
+                    autoFollowup: autoFollowup // New: Control whether webhook auto-responds
                 })
             });
 
@@ -289,6 +324,36 @@ export default function WhatsAppSender() {
 
         } catch (e: any) {
             alert(e.message);
+        }
+    };
+
+    const handleSendDemo = async () => {
+        if (!selectedAccountId) return alert("الرجاء اختيار حساب للإرسال");
+        if (!demoPhones.trim()) return alert("الرجاء إدخال رقم هاتف");
+        if (!messageTemplate.trim()) return alert("الرجاء إدخال نص الدعوة");
+
+        setDemoSending(true);
+        const phones = demoPhones.split(',').map(p => p.trim()).filter(Boolean);
+
+        try {
+            for (const p of phones) {
+                await fetch(`${API_URL}/send-demo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        accountId: selectedAccountId,
+                        phone: p,
+                        message: messageTemplate,
+                        imageUrl: demoImageUrl || null
+                    })
+                });
+                addLog(`[Demo] 🚀 Sent demo to ${p}`);
+            }
+            alert("تم إرسال التجربة بنجاح! سيصلك الرد التلقائي عند الضغط على أزرار التأكيد.");
+        } catch (e: any) {
+            alert('فشل الإرسال: ' + e.message);
+        } finally {
+            setDemoSending(false);
         }
     };
 
@@ -328,18 +393,171 @@ export default function WhatsAppSender() {
     const stopPolling = () => { if (pollingInterval.current) clearInterval(pollingInterval.current); };
 
     // Other handlers
-    const handleEventSelect = (e: any) => {
-        setSelectedEventId(e.target.value);
-        if (e.target.value) { fetchGuests(e.target.value); startPolling(e.target.value); }
-        else { setGuests([]); stopPolling(); }
+    const handleEventSelect = async (e: any) => {
+        const eventId = e.target.value;
+        setSelectedEventId(eventId);
+        if (eventId) {
+            fetchGuests(eventId);
+            startPolling(eventId);
+
+            // Load Global Image + Client Phone from Event
+            const { data: eventData } = await supabase
+                .from('events')
+                .select('settings, client_phone')
+                .eq('id', eventId)
+                .single();
+
+            if (eventData?.settings?.global_invite_image_url) {
+                setGlobalImageUrl(eventData.settings.global_invite_image_url);
+            } else {
+                setGlobalImageUrl('');
+            }
+            setIsDirectSend(eventData?.settings?.whatsapp_settings?.enable_direct_send === true);
+            setClientPhone(eventData?.client_phone || '');
+        }
+        else { setGuests([]); stopPolling(); setGlobalImageUrl(''); setClientPhone(''); }
+    };
+
+    const saveClientPhone = async (phone: string) => {
+        if (!selectedEventId) return;
+        await supabase.from('events').update({ client_phone: phone }).eq('id', selectedEventId);
+        addLog(`📱 رقم العميل محفوظ: ${phone}`);
     };
     const addLog = (m: string) => setLogs(p => [...p.slice(-99), `[${new Date().toLocaleTimeString()}] ${m}`]);
+
+    const handleRetryFailed = async () => {
+        if (!selectedEventId) return;
+        setRetrying(true);
+        try {
+            const res = await fetch(`${API_URL}/retry-failed`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ eventId: selectedEventId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                addLog(`🔄 ${data.count} رسالة جاهزة لإعادة الإرسال`);
+                await fetchGuests(selectedEventId);
+            } else {
+                addLog(`❌ ${data.error}`);
+            }
+        } catch (e: any) {
+            addLog(`❌ خطأ: ${e.message}`);
+        }
+        setRetrying(false);
+    };
+
+    const handleDirectSend = async (guest: any) => {
+        if (!selectedAccountId) return alert("الرجاء اختيار حساب للإرسال");
+        if (!messageTemplate.trim()) return alert("الرسالة فارغة");
+        if (!confirm(`هل أنت متأكد من إرسال الدعوة لـ ${guest.name} الآن؟`)) return;
+
+        addLog(`⏳ إرسال مباشر لـ ${guest.name}...`);
+        try {
+            const res = await fetch(`${API_URL}/send-individual`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accountId: selectedAccountId,
+                    guestId: guest.id,
+                    template: messageTemplate,
+                    imageUrl: globalImageUrl || null
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                addLog(`✅ تم الإرسال لـ ${guest.name} بنجاح`);
+                fetchGuests(selectedEventId);
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (e: any) {
+            addLog(`❌ فشل الإرسال لـ ${guest.name}: ${e.message}`);
+            alert('فشل الإرسال: ' + e.message);
+        }
+    };
+
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !selectedEventId) return;
+
+        setIsUploading(true);
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${selectedEventId}/global_invite_${Date.now()}.${fileExt}`;
+            const filePath = `global-invitations/${fileName}`;
+
+            // 1. Upload to Supabase Storage
+            const { error: uploadError, data } = await supabase.storage
+                .from('global-invitations')
+                .upload(fileName, file, { upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // 2. Get Public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('global-invitations')
+                .getPublicUrl(fileName);
+
+            // 3. Update Event Settings in DB
+            const { data: eventData } = await supabase
+                .from('events')
+                .select('settings')
+                .eq('id', selectedEventId)
+                .single();
+
+            const updatedSettings = {
+                ...(eventData?.settings || {}),
+                global_invite_image_url: publicUrl
+            };
+
+            await supabase
+                .from('events')
+                .update({ settings: updatedSettings })
+                .eq('id', selectedEventId);
+
+            setGlobalImageUrl(publicUrl);
+            addLog("تم رفع صورة الدعوة بنجاح ✅");
+        } catch (error: any) {
+            console.error("Upload Error:", error);
+            alert("فشل الرفع: " + error.message);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleRemoveImage = async () => {
+        if (!selectedEventId) return;
+
+        try {
+            const { data: eventData } = await supabase
+                .from('events')
+                .select('settings')
+                .eq('id', selectedEventId)
+                .single();
+
+            const updatedSettings = {
+                ...(eventData?.settings || {}),
+                global_invite_image_url: null
+            };
+
+            await supabase
+                .from('events')
+                .update({ settings: updatedSettings })
+                .eq('id', selectedEventId);
+
+            setGlobalImageUrl('');
+            addLog("تم حذف صورة الدعوة 🗑️");
+        } catch (error: any) {
+            alert("فشل حذف الصورة");
+        }
+    };
 
 
     // === RESPONSIVE LAYOUT HELPERS ===
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
-    // === RENDER ===
     return (
         <div className="flex bg-slate-50 h-screen w-full overflow-hidden text-right font-sans" dir="rtl">
 
@@ -352,15 +570,15 @@ export default function WhatsAppSender() {
             )}
 
             {/* --- SIDEBAR --- */}
-            <div className={`
+            <aside className={`
                 fixed lg:static inset-y-0 right-0 z-40
                 w-72 bg-white border-l border-gray-200 shadow-2xl lg:shadow-none
                 transform transition-transform duration-300 ease-in-out flex flex-col
                 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
             `}>
-                <div className="p-4 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50 flex justify-between items-center">
+                <div className="p-4 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50 flex justify-between items-center shrink-0">
                     <h2 className="font-bold text-gray-800 flex items-center gap-2 text-lg">
-                        <Settings className="w-5 h-5 text-indigo-600" />
+                        <Play className="w-5 h-5 text-indigo-600" />
                         إعدادات الحملة
                     </h2>
                     <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 hover:bg-gray-100 rounded-lg text-gray-500">
@@ -369,118 +587,219 @@ export default function WhatsAppSender() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                    {/* Event Selector */}
-                    <div>
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">المناسبة</label>
-                        <select
-                            value={selectedEventId}
-                            onChange={handleEventSelect}
-                            className="w-full p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold text-gray-700 shadow-sm"
-                        >
-                            <option value="">-- اختر المناسبة --</option>
-                            {events.map(e => <option key={e.id} value={e.id}>🎉 {e.name}</option>)}
-                        </select>
-
-                        {/* Event Details Summary */}
-                        {(() => {
-                            const selectedEvent = events.find(e => e.id === selectedEventId);
-                            if (!selectedEventId || !selectedEvent) return null;
-
-                            return (
-                                <div className="mt-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg text-xs space-y-1">
-                                    <div className="flex items-center gap-2 text-indigo-900 font-bold">
-                                        <span className="text-lg">📅</span>
-                                        {selectedEvent.event_date ? new Date(selectedEvent.event_date).toLocaleDateString('ar-SA') : 'غير محدد'}
-                                    </div>
-                                    <div className="flex items-center gap-2 text-indigo-800">
-                                        <span className="text-lg">📍</span> {selectedEvent.location || 'غير محدد'}
-                                    </div>
-                                    <div className="text-[10px] text-indigo-400 font-mono mt-1 pt-1 border-t border-indigo-100">
-                                        ID: {selectedEvent.id?.slice(0, 8)}...
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                    </div>
-
-                    <div className="w-full h-px bg-gray-100" />
-
                     {/* Campaign Type */}
                     <div>
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">نوع الحملة</label>
-                        <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">نوع الحملة</label>
+                        <div className="grid grid-cols-1 gap-2">
                             <button
                                 onClick={() => setCampaignType('invite')}
-                                className={`w-full p-3 rounded-lg border text-right transition-all flex items-center gap-3 ${campaignType === 'invite' ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                                className={`p-3 rounded-xl border text-right transition-all flex items-center gap-3 ${campaignType === 'invite' ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
                             >
-                                <div className={`p-2 rounded-full ${campaignType === 'invite' ? 'bg-indigo-200 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
-                                    <Send className="w-4 h-4" />
+                                <div className={`p-2 rounded-lg ${campaignType === 'invite' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-gray-100 text-gray-500'}`}>
+                                    <Send className="w-3 h-3" />
                                 </div>
-                                <div>
-                                    <div className="font-bold text-sm text-gray-800">دعوة عامة</div>
-                                    <div className="text-[10px] text-gray-500">نص + صورة (لكل القائمة)</div>
+                                <div className="flex-1">
+                                    <div className="font-bold text-xs text-slate-800">دعوة عامة</div>
+                                    <div className="text-[9px] text-slate-500">نص + صورة للكل</div>
                                 </div>
                             </button>
 
                             <button
                                 onClick={() => setCampaignType('qr_code')}
-                                className={`w-full p-3 rounded-lg border text-right transition-all flex items-center gap-3 ${campaignType === 'qr_code' ? 'bg-purple-50 border-purple-500 ring-1 ring-purple-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+                                className={`p-3 rounded-xl border text-right transition-all flex items-center gap-3 ${campaignType === 'qr_code' ? 'bg-purple-50 border-purple-500 ring-1 ring-purple-500' : 'bg-white border-gray-200 hover:border-gray-300'}`}
                             >
-                                <div className={`p-2 rounded-full ${campaignType === 'qr_code' ? 'bg-purple-200 text-purple-700' : 'bg-gray-100 text-gray-500'}`}>
-                                    <Zap className="w-4 h-4" />
+                                <div className={`p-2 rounded-lg ${campaignType === 'qr_code' ? 'bg-purple-600 text-white shadow-md shadow-purple-100' : 'bg-gray-100 text-gray-500'}`}>
+                                    <Zap className="w-3 h-3" />
                                 </div>
-                                <div>
-                                    <div className="font-bold text-sm text-gray-800">إرسال كروت الباركود</div>
-                                    <div className="text-[10px] text-gray-500">فقط للمؤكدين (Confirmed)</div>
+                                <div className="flex-1">
+                                    <div className="font-bold text-xs text-slate-800">كروت الباركود</div>
+                                    <div className="text-[9px] text-slate-500">للمؤكدين فقط</div>
                                 </div>
+                            </button>
+                        </div>
+
+                        {/* Direct Send Status Indicator */}
+                        {isDirectSend && (
+                            <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 animate-pulse">
+                                <Zap className="w-3 h-3 text-amber-600" />
+                                <span className="text-[10px] font-bold text-amber-700">نمط الإرسال المباشر نشط</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="w-full h-px bg-slate-100" />
+
+                    {/* 1. Global Image Section (UPLOADER) */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 block">صورة الدعوة العامة</label>
+
+                        {!globalImageUrl ? (
+                            <div className="relative">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleImageUpload}
+                                    className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                                    disabled={isUploading || !selectedEventId}
+                                />
+                                <div className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${isUploading ? 'bg-gray-50 border-gray-200' : 'bg-white border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30'}`}>
+                                    {isUploading ? (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                                            <span className="text-[10px] font-bold text-slate-400">جاري الرفع...</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center gap-2">
+                                            <Upload className="w-6 h-6 text-slate-400" />
+                                            <span className="text-[10px] font-bold text-slate-500">رفع صورة الدعوة</span>
+                                            <span className="text-[8px] text-slate-400">JPG, PNG (Max 5MB)</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="relative aspect-video rounded-xl overflow-hidden border border-gray-200 bg-white group shadow-sm">
+                                <img src={globalImageUrl} alt="Preview" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+                                    <button
+                                        onClick={handleRemoveImage}
+                                        className="p-2 bg-rose-500 text-white rounded-full hover:bg-rose-600 transition-colors shadow-lg"
+                                        title="حذف الصورة"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                    <span className="text-white text-[9px] font-bold">حذف وصورة جديدة</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {!selectedEventId && (
+                            <p className="text-[8px] text-rose-500 mt-2 font-bold flex items-center gap-1">
+                                <Shield className="w-2.5 h-2.5" />
+                                اختر المناسبة أولاً للتمكن من رفع الصورة
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Client Phone Section */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">📱 رقم العميل (للإشعارات)</label>
+                        <input
+                            type="tel"
+                            dir="ltr"
+                            value={clientPhone}
+                            onChange={(e) => setClientPhone(e.target.value)}
+                            onBlur={() => clientPhone && saveClientPhone(clientPhone)}
+                            placeholder="05XXXXXXXX"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 text-left focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                        {clientPhone && (
+                            <p className="text-[8px] text-emerald-600 mt-1 font-bold flex items-center gap-1">
+                                <CheckCircle className="w-2.5 h-2.5" />
+                                البوت يبلّغ العميل تلقائياً عند كل تأكيد/اعتذار
+                            </p>
+                        )}
+                        {!clientPhone && selectedEventId && (
+                            <p className="text-[8px] text-amber-500 mt-1 font-bold">
+                                ⚠️ أدخل رقم العميل ليصله إشعارات RSVP
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Automation Section */}
+                    <div className="space-y-3">
+                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">أتمتة الاستجابة</label>
+                        <div className="flex justify-between items-center p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-100 shadow-sm">
+                            <div className="flex flex-col">
+                                <span className="text-[11px] font-bold">إرسال البطاقات آلياً</span>
+                                <span className="text-[8px] opacity-70 italic leading-tight">إرسال الكرت فور تأكيد الحضور من الضيف</span>
+                            </div>
+                            <button
+                                onClick={() => setAutoFollowup(!autoFollowup)}
+                                className={`w-10 h-5 rounded-full transition-all relative ${autoFollowup ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                            >
+                                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${autoFollowup ? 'right-0.5' : 'left-0.5'}`} />
                             </button>
                         </div>
                     </div>
 
-                    <div className="w-full h-px bg-gray-100" />
-
-                    {/* Sender Account Selection */}
-                    <div>
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">حساب الإرسال</label>
-                        <select
-                            value={selectedAccountId}
-                            onChange={(e) => setSelectedAccountId(e.target.value)}
-                            className="w-full p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-semibold text-gray-700 shadow-sm"
-                        >
-                            <option value="">-- الجوال الافتراضي --</option>
-                            {accounts.filter(a => a.connected).map(a => (
-                                <option key={a.id} value={a.id}>📱 {a.name || a.phone}</option>
-                            ))}
-                        </select>
-                        <div className="mt-2 text-[10px] text-gray-500">
-                            اختر الرقم الذي سيتم إرسال الحملة منه.
-                        </div>
-                    </div>
-
-                    <div className="w-full h-px bg-gray-100" />
+                    <div className="w-full h-px bg-slate-100" />
 
                     {/* Devices */}
-                    <div>
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">الأجهزة المتصلة</label>
-                        <ConnectionPanel accounts={accounts} onAccountsChange={fetchAccounts} addLog={addLog} />
+                    <div className="pb-6">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">الأجهزة المتصلة</label>
+                        <div className="transform scale-90 origin-right -mr-2">
+                            <ConnectionPanel accounts={accounts} onAccountsChange={fetchAccounts} addLog={addLog} />
+                        </div>
                     </div>
-
                 </div>
-            </div>
+            </aside>
 
             {/* --- MAIN CONTENT AREA --- */}
             <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
 
-                {/* Mobile Header Toggle */}
-                <div className="lg:hidden bg-white border-b p-4 flex justify-between items-center shrink-0">
-                    <h1 className="font-bold text-gray-800">إدارة الحملات</h1>
-                    <button onClick={() => setSidebarOpen(true)} className="p-2 bg-gray-100 rounded-lg text-gray-600">
-                        <Settings className="w-5 h-5" />
-                    </button>
-                </div>
+                {/* --- TOP FIXED HEADER (Global Selection Area) --- */}
+                <header className="h-20 bg-white border-b border-gray-200 z-20 px-6 flex items-center justify-between shadow-sm shrink-0">
+                    <div className="flex items-center gap-8">
+                        {/* Event Selection */}
+                        <div className="flex flex-col gap-1 min-w-[240px]">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">اختيار المناسبة</label>
+                            <select
+                                value={selectedEventId}
+                                onChange={handleEventSelect}
+                                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-extrabold text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none appearance-none cursor-pointer"
+                                style={{
+                                    backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%2364748b\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'%3E%3C/path%3E%3C/svg%3E")',
+                                    backgroundRepeat: 'no-repeat',
+                                    backgroundPosition: 'left 0.75rem center',
+                                    backgroundSize: '1rem'
+                                }}
+                            >
+                                <option value="">-- اختر المناسبة --</option>
+                                {events.map(e => <option key={e.id} value={e.id}>🎉 {e.name}</option>)}
+                            </select>
+                        </div>
 
-                {/* Main Scrollable Area */}
-                <div className="flex-1 overflow-y-auto p-4 lg:p-6 scroll-smooth">
+                        {/* Account Selection Area */}
+                        <div className="hidden md:flex flex-col gap-1 min-w-[200px]">
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">حساب الإرسال</label>
+                            <select
+                                value={selectedAccountId}
+                                onChange={(e) => setSelectedAccountId(e.target.value)}
+                                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-extrabold text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all outline-none appearance-none cursor-pointer"
+                                style={{
+                                    backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'%2364748b\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'%3E%3C/path%3E%3C/svg%3E")',
+                                    backgroundRepeat: 'no-repeat',
+                                    backgroundPosition: 'left 0.75rem center',
+                                    backgroundSize: '1rem'
+                                }}
+                            >
+                                <option value="">-- الجوال الافتراضي --</option>
+                                {accounts.filter(a => a.connected).map(a => (
+                                    <option key={a.id} value={a.id}>📱 {a.name || a.phone}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <div className="flex flex-col items-end">
+                            <span className="text-xs font-black text-slate-800">نشط الآن</span>
+                            <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                                النظام متصل بالسيرفر
+                            </span>
+                        </div>
+                        <button
+                            onClick={() => setSidebarOpen(!sidebarOpen)}
+                            className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors lg:hidden"
+                        >
+                            <Settings className="w-5 h-5" />
+                        </button>
+                    </div>
+                </header>
+
+                <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                     <div className="max-w-[1600px] mx-auto space-y-6">
 
                         {/* Top Header & Stats */}
@@ -505,166 +824,298 @@ export default function WhatsAppSender() {
                             </div>
                         </div>
 
-                        {/* Two Column Layout: Table vs Editor */}
-                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 pb-20">
+                        {/* Tabs Navigation */}
+                        <div className="flex border-b border-gray-200">
+                            <button
+                                onClick={() => setActiveTab('campaign')}
+                                className={`px-6 py-3 font-bold text-sm transition-colors ${activeTab === 'campaign' ? 'border-b-2 border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                إدارة الحملة الأساسية
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('demo')}
+                                className={`px-6 py-3 font-bold text-sm transition-colors flex items-center gap-2 ${activeTab === 'demo' ? 'border-b-2 border-indigo-600 text-indigo-700 bg-indigo-50/50' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                <Sparkles className="w-4 h-4" />
+                                تجربة الخدمة (Demo)
+                            </button>
+                        </div>
 
-                            {/* Left: Guest Table (Takes more space) */}
-                            <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
-                                <div className="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0">
-                                    <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
-                                        <User className="w-4 h-4 text-gray-400" />
-                                        قائمة الضيوف
-                                    </h3>
-                                    <div className="flex gap-2 text-[10px] text-gray-500 bg-white px-3 py-1.5 rounded-full border shadow-sm">
-                                        <span className="font-bold text-gray-700">العدد: {guests.length}</span>
-                                        <span className="text-gray-300">|</span>
-                                        <span className="text-green-600 font-bold">المؤكدين: {rsvpStats.confirmed}</span>
-                                    </div>
-                                </div>
-                                <div className="flex-1 overflow-hidden relative">
-                                    <div className="absolute inset-0">
-                                        <GuestTable guests={guests} onRetry={() => { }} onOverrideStatus={handleOverrideStatus} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Right: Smart Editor (Sticky on large screens) */}
-                            <div className="xl:col-span-5 flex flex-col gap-4">
-                                {!selectedEventId ? (
-                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
-                                        <Bot className="w-16 h-16 mb-4 opacity-10" />
-                                        <h3 className="font-bold text-lg text-gray-600 mb-2">اختر مناسبة للبدء</h3>
-                                        <p className="text-sm text-gray-400 max-w-[200px] leading-relaxed">
-                                            قم باختيار المناسبة من القائمة الجانبية لتفعيل المحرر الذكي وإطلاق الحملات.
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        {/* Editor Card */}
-                                        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
-                                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-                                                <div className="flex items-center gap-2">
-                                                    <Bot className="w-5 h-5 text-indigo-600" />
-                                                    <span className="font-bold text-gray-800 text-sm">المحرر الذكي</span>
-                                                </div>
+                        {/* Main Container Content based on Tab */}
+                        {activeTab === 'campaign' ? (
+                            <div className="space-y-4 pb-20">
+                                {/* Delivery Tracking Stats Bar */}
+                                {selectedEventId && deliveryStats.total > 0 && (
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h4 className="text-xs font-bold text-gray-600 flex items-center gap-2">
+                                                <Mail className="w-4 h-4 text-indigo-500" />
+                                                حالة التوصيل
+                                            </h4>
+                                            {deliveryStats.failed > 0 && (
                                                 <Button
                                                     size="sm"
-                                                    variant="ghost"
-                                                    onClick={handleGenerateAI}
-                                                    disabled={aiGenerating}
-                                                    className="h-8 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3"
+                                                    variant="outline"
+                                                    onClick={handleRetryFailed}
+                                                    disabled={retrying}
+                                                    className="h-7 text-[10px] border-orange-200 text-orange-600 hover:bg-orange-50 gap-1"
                                                 >
-                                                    <Sparkles className={`w-3 h-3 mr-1.5 ${aiGenerating ? 'animate-spin' : ''}`} />
-                                                    {aiGenerating ? 'جاري الصياغة...' : 'توليد AI'}
+                                                    {retrying ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+                                                    إعادة إرسال الفاشلة ({deliveryStats.failed})
                                                 </Button>
+                                            )}
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-3">
+                                            <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
+                                                <Mail className="w-4 h-4 text-blue-500 mx-auto mb-1" />
+                                                <div className="text-lg font-black text-blue-700">{deliveryStats.sent}</div>
+                                                <div className="text-[9px] text-blue-500 font-bold">أُرسلت ✅</div>
                                             </div>
-
-                                            <div className="p-4 flex flex-col gap-4">
-                                                {/* Variables */}
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block tracking-wider">متغيرات ذكية</label>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <TemplateVariable label="اسم الضيف" value="{{name}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
-                                                        <TemplateVariable label="الموقع" value="{{location}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
-                                                        <TemplateVariable label="رابط الباركود" value="{{qr_link}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
-                                                    </div>
-                                                </div>
-
-                                                {/* Textarea */}
-                                                <div className="relative group min-h-[300px] xl:min-h-[250px]">
-                                                    <textarea
-                                                        value={messageTemplate}
-                                                        onChange={e => setMessageTemplate(e.target.value)}
-                                                        className="w-full h-full p-4 bg-gray-50/50 border-2 border-dashed border-gray-200 focus:border-solid focus:border-indigo-500 focus:bg-white rounded-xl resize-none transition-all text-sm leading-relaxed outline-none"
-                                                        placeholder="اكتب رسالتك هنا... استخدم المتغيرات أعلاه لتخصيص الرسالة."
-                                                        style={{ height: '100%', minHeight: '200px' }}
-                                                    />
-                                                    <div className="absolute bottom-3 left-3 text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded backdrop-blur border border-gray-100">
-                                                        {messageTemplate.length} حرف
-                                                    </div>
-                                                </div>
+                                            <div className="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
+                                                <MailCheck className="w-4 h-4 text-emerald-500 mx-auto mb-1" />
+                                                <div className="text-lg font-black text-emerald-700">{deliveryStats.delivered}</div>
+                                                <div className="text-[9px] text-emerald-500 font-bold">وصلت ✅✅</div>
                                             </div>
-
-                                            {/* Sending Settings */}
-                                            <div className="p-4 bg-gray-50 border-t border-gray-100 space-y-4">
-                                                <div className="flex justify-between items-center">
-                                                    <label className="text-xs font-bold text-gray-600">سرعة الإرسال</label>
-                                                    <SpeedControl speed={sendingSpeed} setSpeed={setSendingSpeed} />
-                                                </div>
-
-                                                <div className="flex justify-between items-center py-2 border-t border-gray-100/50">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-xs font-bold text-gray-700">استخدام الأزرار التفاعلية</span>
-                                                        <span className="text-[10px] text-gray-400">✅ تأكيد / ❌ اعتذار</span>
-                                                    </div>
-                                                    <button
-                                                        onClick={() => setUseButtons(!useButtons)}
-                                                        className={`w-12 h-6 rounded-full transition-colors relative ${useButtons ? 'bg-indigo-600' : 'bg-gray-300'}`}
-                                                    >
-                                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${useButtons ? 'right-1' : 'left-1'}`} />
-                                                    </button>
-                                                </div>
-
-                                                {/* Action Buttons */}
-                                                {!queueStatus.isRunning ? (
-                                                    <Button
-                                                        onClick={handleStartQueue}
-                                                        className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-95 text-sm font-bold flex justify-center items-center gap-2 rounded-xl"
-                                                    >
-                                                        <Send className="w-5 h-5" />
-                                                        إرسال الحملة الآن
-                                                    </Button>
-                                                ) : (
-                                                    <div className="space-y-3">
-                                                        <div className="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm">
-                                                            <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2">
-                                                                <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> جاري الإرسال...</span>
-                                                                <span>{queueStatus.processed} / {queueStatus.total}</span>
-                                                            </div>
-                                                            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                                                                <div className="h-full bg-indigo-500 transition-all duration-300 rounded-full" style={{ width: `${(queueStatus.processed / (queueStatus.total || 1)) * 100}%` }}></div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            <Button size="sm" variant="outline" className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300" onClick={async () => {
-                                                                await fetch(`${API_URL}/stop`, { method: 'POST' });
-                                                                setQueueStatus((p: any) => ({ ...p, isRunning: false }));
-                                                            }}>إيقاف كلي</Button>
-                                                            <Button size="sm" variant="outline" className="flex-1 bg-indigo-50 text-indigo-700 border border-indigo-100" onClick={async () => {
-                                                                const ep = queueStatus.isPaused ? 'resume' : 'pause';
-                                                                await fetch(`${API_URL}/${ep}`, { method: 'POST' });
-                                                                setQueueStatus((p: any) => ({ ...p, isPaused: !p.isPaused }));
-                                                            }}>{queueStatus.isPaused ? 'استئناف' : 'إيقاف مؤقت'}</Button>
-                                                        </div>
-                                                    </div>
-                                                )}
+                                            <div className="bg-indigo-50 rounded-xl p-3 text-center border border-indigo-100">
+                                                <Eye className="w-4 h-4 text-indigo-500 mx-auto mb-1" />
+                                                <div className="text-lg font-black text-indigo-700">{deliveryStats.read}</div>
+                                                <div className="text-[9px] text-indigo-500 font-bold">قُرأت 👁️</div>
+                                            </div>
+                                            <div className="bg-red-50 rounded-xl p-3 text-center border border-red-100">
+                                                <AlertTriangle className="w-4 h-4 text-red-500 mx-auto mb-1" />
+                                                <div className="text-lg font-black text-red-700">{deliveryStats.failed}</div>
+                                                <div className="text-[9px] text-red-500 font-bold">فشلت ❌</div>
                                             </div>
                                         </div>
-
-                                        {/* Logs */}
-                                        <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-xl flex flex-col border border-slate-800">
-                                            <div className="px-4 py-2 bg-slate-950 text-[10px] text-slate-400 font-mono flex justify-between items-center border-b border-slate-800">
-                                                <span className="font-bold flex items-center gap-2">
-                                                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                                                    Console Output
-                                                </span>
-                                            </div>
-                                            <div ref={logContainerRef} className="h-40 xl:h-48 overflow-y-auto p-4 text-[10px] font-mono space-y-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                                                {logs.length === 0 && <span className="text-slate-600 italic opacity-50 block text-center mt-10">System ready... No activity yet.</span>}
-                                                {logs.map((l, i) => (
-                                                    <div key={i} className="text-emerald-400 border-l-2 border-slate-700 pl-3 leading-relaxed opacity-90 hover:opacity-100 transition-opacity break-words">
-                                                        <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString('en-US', { hour12: false })}]</span>
-                                                        {l}
-                                                    </div>
-                                                ))}
-                                            </div>
+                                        {/* Progress bar */}
+                                        <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden flex">
+                                            {deliveryStats.read > 0 && <div className="h-full bg-indigo-500 transition-all" style={{ width: `${(deliveryStats.read / deliveryStats.total) * 100}%` }} />}
+                                            {deliveryStats.delivered > 0 && <div className="h-full bg-emerald-400 transition-all" style={{ width: `${(deliveryStats.delivered / deliveryStats.total) * 100}%` }} />}
+                                            {deliveryStats.sent > 0 && <div className="h-full bg-blue-300 transition-all" style={{ width: `${(deliveryStats.sent / deliveryStats.total) * 100}%` }} />}
+                                            {deliveryStats.failed > 0 && <div className="h-full bg-red-400 transition-all" style={{ width: `${(deliveryStats.failed / deliveryStats.total) * 100}%` }} />}
                                         </div>
-                                    </>
+                                    </div>
                                 )}
+
+                                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                                    {/* Two Column Layout: Table vs Editor */}
+                                    <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
+                                        <div className="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0">
+                                            <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
+                                                <User className="w-4 h-4 text-gray-400" />
+                                                قائمة الضيوف
+                                            </h3>
+                                            <div className="flex gap-2 text-[10px] text-gray-500 bg-white px-3 py-1.5 rounded-full border shadow-sm">
+                                                <span className="font-bold text-gray-700">العدد: {guests.length}</span>
+                                                <span className="text-gray-300">|</span>
+                                                <span className="text-green-600 font-bold">المؤكدين: {rsvpStats.confirmed}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-hidden relative">
+                                            <div className="absolute inset-0">
+                                                <GuestTable
+                                                    guests={guests}
+                                                    onRetry={handleDirectSend}
+                                                    onDirectSend={handleDirectSend}
+                                                    onOverrideStatus={handleOverrideStatus}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Right: Smart Editor (Sticky on large screens) */}
+                                    <div className="xl:col-span-5 flex flex-col gap-4">
+                                        {!selectedEventId ? (
+                                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
+                                                <Bot className="w-16 h-16 mb-4 opacity-10" />
+                                                <h3 className="font-bold text-lg text-gray-600 mb-2">اختر مناسبة للبدء</h3>
+                                                <p className="text-sm text-gray-400 max-w-[200px] leading-relaxed">
+                                                    قم باختيار المناسبة من القائمة الجانبية لتفعيل المحرر الذكي وإطلاق الحملات.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {/* Editor Card */}
+                                                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
+                                                    <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                                                        <div className="flex items-center gap-2">
+                                                            <Bot className="w-5 h-5 text-indigo-600" />
+                                                            <span className="font-bold text-gray-800 text-sm">المحرر الذكي</span>
+                                                        </div>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            onClick={handleGenerateAI}
+                                                            disabled={aiGenerating}
+                                                            className="h-8 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3"
+                                                        >
+                                                            <Sparkles className={`w-3 h-3 mr-1.5 ${aiGenerating ? 'animate-spin' : ''}`} />
+                                                            {aiGenerating ? 'جاري الصياغة...' : 'توليد AI'}
+                                                        </Button>
+                                                    </div>
+
+                                                    <div className="p-4 flex flex-col gap-4">
+                                                        {/* Variables */}
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block tracking-wider">متغيرات ذكية</label>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                <TemplateVariable label="اسم الضيف" value="{{name}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                                <TemplateVariable label="الموقع" value="{{location}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                                <TemplateVariable label="رابط الباركود" value="{{qr_link}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Textarea */}
+                                                        <div className="relative group min-h-[300px] xl:min-h-[250px]">
+                                                            <textarea
+                                                                value={messageTemplate}
+                                                                onChange={e => setMessageTemplate(e.target.value)}
+                                                                className="w-full h-full p-4 bg-gray-50/50 border-2 border-dashed border-gray-200 focus:border-solid focus:border-indigo-500 focus:bg-white rounded-xl resize-none transition-all text-sm leading-relaxed outline-none"
+                                                                placeholder="اكتب رسالتك هنا... استخدم المتغيرات أعلاه لتخصيص الرسالة."
+                                                                style={{ height: '100%', minHeight: '200px' }}
+                                                            />
+                                                            <div className="absolute bottom-3 left-3 text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded backdrop-blur border border-gray-100">
+                                                                {messageTemplate.length} حرف
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Sending Settings */}
+                                                    <div className="p-4 bg-gray-50 border-t border-gray-100 space-y-4">
+                                                        <div className="flex justify-between items-center">
+                                                            <label className="text-xs font-bold text-gray-600">سرعة الإرسال</label>
+                                                            <SpeedControl speed={sendingSpeed} setSpeed={setSendingSpeed} />
+                                                        </div>
+
+                                                        <div className="flex justify-between items-center py-2 border-t border-gray-100/50">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-xs font-bold text-gray-700">استخدام الأزرار التفاعلية</span>
+                                                                <span className="text-[10px] text-gray-400">✅ تأكيد / ❌ اعتذار</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => setUseButtons(!useButtons)}
+                                                                className={`w-12 h-6 rounded-full transition-colors relative ${useButtons ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                                                            >
+                                                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${useButtons ? 'right-1' : 'left-1'}`} />
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Action Buttons */}
+                                                        {!queueStatus.isRunning ? (
+                                                            <Button
+                                                                onClick={handleStartQueue}
+                                                                className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-95 text-sm font-bold flex justify-center items-center gap-2 rounded-xl"
+                                                            >
+                                                                <Send className="w-5 h-5" />
+                                                                إرسال الحملة الآن
+                                                            </Button>
+                                                        ) : (
+                                                            <div className="space-y-3">
+                                                                <div className="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm">
+                                                                    <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2">
+                                                                        <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> جاري الإرسال...</span>
+                                                                        <span>{queueStatus.processed} / {queueStatus.total}</span>
+                                                                    </div>
+                                                                    <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                                                                        <div className="h-full bg-indigo-500 transition-all duration-300 rounded-full" style={{ width: `${(queueStatus.processed / (queueStatus.total || 1)) * 100}%` }}></div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <Button size="sm" variant="outline" className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300" onClick={async () => {
+                                                                        await fetch(`${API_URL}/stop`, { method: 'POST' });
+                                                                        setQueueStatus((p: any) => ({ ...p, isRunning: false }));
+                                                                    }}>إيقاف كلي</Button>
+                                                                    <Button size="sm" variant="outline" className="flex-1 bg-indigo-50 text-indigo-700 border border-indigo-100" onClick={async () => {
+                                                                        const ep = queueStatus.isPaused ? 'resume' : 'pause';
+                                                                        await fetch(`${API_URL}/${ep}`, { method: 'POST' });
+                                                                        setQueueStatus((p: any) => ({ ...p, isPaused: !p.isPaused }));
+                                                                    }}>{queueStatus.isPaused ? 'استئناف' : 'إيقاف مؤقت'}</Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Logs */}
+                                                <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-xl flex flex-col border border-slate-800">
+                                                    <div className="px-4 py-2 bg-slate-950 text-[10px] text-slate-400 font-mono flex justify-between items-center border-b border-slate-800">
+                                                        <span className="font-bold flex items-center gap-2">
+                                                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                                            Console Output
+                                                        </span>
+                                                    </div>
+                                                    <div ref={logContainerRef} className="h-40 xl:h-48 overflow-y-auto p-4 text-[10px] font-mono space-y-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                                                        {logs.length === 0 && <span className="text-slate-600 italic opacity-50 block text-center mt-10">System ready... No activity yet.</span>}
+                                                        {logs.map((l, i) => (
+                                                            <div key={i} className="text-emerald-400 border-l-2 border-slate-700 pl-3 leading-relaxed opacity-90 hover:opacity-100 transition-opacity break-words">
+                                                                <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString('en-US', { hour12: false })}]</span>
+                                                                {l}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-20 max-w-4xl mx-auto flex flex-col gap-6">
+                                {/* DEMO TAB VIEW */}
+                                <div className="text-center mb-4">
+                                    <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <Sparkles className="w-8 h-8" />
+                                    </div>
+                                    <h2 className="text-2xl font-black text-gray-800">تجربة الخدمة (Demo)</h2>
+                                    <p className="text-gray-500 mt-2">أرسل دعوة تجريبية لعملائك قبل إطلاق الحملة لمعاينة تجربة الاستلام والرد الآلي.</p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">أرقام هواتف التجربة (مفصولة بفاصلة)</label>
+                                        <input
+                                            type="text"
+                                            value={demoPhones}
+                                            onChange={e => setDemoPhones(e.target.value)}
+                                            placeholder="مثال: 966500000000, 966511111111"
+                                            className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-indigo-500 focus:bg-white transition-all text-left"
+                                            dir="ltr"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">رابط صورة عينة الكرت (اختياري)</label>
+                                        <input
+                                            type="text"
+                                            value={demoImageUrl}
+                                            onChange={e => setDemoImageUrl(e.target.value)}
+                                            placeholder="https://example.com/image.jpg"
+                                            className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-indigo-500 focus:bg-white transition-all text-left"
+                                            dir="ltr"
+                                        />
+                                    </div>
+                                    <div className="relative group">
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">نص الدعوة</label>
+                                        <textarea
+                                            value={messageTemplate}
+                                            onChange={e => setMessageTemplate(e.target.value)}
+                                            className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl focus:border-indigo-500 focus:bg-white resize-none transition-all text-sm leading-relaxed outline-none min-h-[220px]"
+                                            placeholder="اكتب رسالتك التجريبية هنا..."
+                                        />
+                                    </div>
+
+                                    <Button
+                                        onClick={handleSendDemo}
+                                        disabled={demoSending}
+                                        className="w-full h-14 mt-4 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-95 text-base font-bold flex justify-center items-center gap-2 rounded-xl"
+                                    >
+                                        {demoSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                                        {demoSending ? 'جاري إرسال التجربة ...' : 'إرسال الرسالة التجريبية الآن'}
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                     </div>
-                </div>
+                </main>
             </div>
         </div>
     );

@@ -1,51 +1,77 @@
-import 'dotenv/config';
-
+/**
+ * 🔧 Fix webhook URL - change port from 3010 to 3001
+ */
 const EVOLUTION_URL = 'http://localhost:8081';
-const API_KEY = '429683C4C977415CAAFCCE10F7D57E11';
+const EVOLUTION_API_KEY = '429683C4C977415CAAFCCE10F7D57E11';
+const CORRECT_WEBHOOK = 'http://host.docker.internal:3001/webhook';
 
-// Important: On Windows Docker, the host is 'host.docker.internal'
-const WEBHOOK_URL = 'http://host.docker.internal:3001/webhook';
+async function main() {
+    console.log('🔧 Fixing webhook URL...\n');
+    console.log('❌ Old: http://host.docker.internal:3010/webhook (WRONG PORT)');
+    console.log('✅ New: http://host.docker.internal:3001/webhook (CORRECT)\n');
 
-async function setWebhook() {
-    console.log('🔄 Configuring Webhook...');
-    console.log(`Target: ${WEBHOOK_URL}`);
+    // Try all methods to set the correct URL
+    const methods = [
+        { endpoint: '/webhook/set/lony', method: 'POST', body: { url: CORRECT_WEBHOOK, webhook_by_events: false, webhook_base64: false, events: ['MESSAGES_UPSERT'] } },
+        { endpoint: '/webhook/set/lony', method: 'PUT', body: { url: CORRECT_WEBHOOK, webhook_by_events: false, webhook_base64: false, events: ['MESSAGES_UPSERT'] } },
+        { endpoint: '/webhook/set/lony', method: 'POST', body: { webhook: { url: CORRECT_WEBHOOK, events: ['MESSAGES_UPSERT'] } } },
+        { endpoint: '/webhook/set/lony', method: 'POST', body: { enabled: true, url: CORRECT_WEBHOOK, events: ['MESSAGES_UPSERT'] } },
+    ];
 
-    try {
-        const response = await fetch(`${EVOLUTION_URL}/webhook/find`, {
-            method: 'GET',
-            headers: {
-                'apikey': API_KEY
+    for (let i = 0; i < methods.length; i++) {
+        const m = methods[i];
+        console.log(`🧪 Attempt ${i + 1}: ${m.method} ${m.endpoint}...`);
+        try {
+            const resp = await fetch(`${EVOLUTION_URL}${m.endpoint}`, {
+                method: m.method,
+                headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+                body: JSON.stringify(m.body)
+            });
+            const data = await resp.json();
+            if (resp.status >= 200 && resp.status < 300) {
+                console.log(`   ✅ SUCCESS! Status: ${resp.status}`);
+                break;
+            } else {
+                console.log(`   ❌ Failed (${resp.status}):`, JSON.stringify(data).substring(0, 150));
             }
-        });
+        } catch (e) {
+            console.log(`   ❌ Error:`, e.message);
+        }
+    }
 
-        // If needed, we set it
-        const setResponse = await fetch(`${EVOLUTION_URL}/webhook/set`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': API_KEY
-            },
-            body: JSON.stringify({
-                url: WEBHOOK_URL,
-                webhookByEvents: false,
-                events: [
-                    "MESSAGES_UPSERT",
-                    "MESSAGES_UPDATE",
-                    "CONNECTION_UPDATE"
-                ]
-            })
-        });
+    // Verify
+    console.log('\n📋 Verifying webhook config...');
+    const resp = await fetch(`${EVOLUTION_URL}/webhook/find/lony`, {
+        headers: { 'apikey': EVOLUTION_API_KEY }
+    });
+    const config = await resp.json();
+    console.log('   URL:', config.url || JSON.stringify(config).substring(0, 200));
 
-        const data = await setResponse.json();
-        console.log('✅ Webhook Response:', JSON.stringify(data, null, 2));
-
-        if (data?.webhook?.url === WEBHOOK_URL) {
-            console.log('🎉 Success! Webhook is now pointing to your local server correctly.');
+    if (config.url === CORRECT_WEBHOOK) {
+        console.log('\n🎉 WEBHOOK FIXED! البوت الآن يستقبل الرسائل على البورت الصحيح 3001');
+    } else if (config.url?.includes('3010')) {
+        console.log('\n⚠️ URL still shows 3010. Trying Evolution Manager direct update...');
+        // Try updating via the Manager API
+        try {
+            const updateResp = await fetch(`${EVOLUTION_URL}/webhook/lony`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+                body: JSON.stringify({ url: CORRECT_WEBHOOK, events: ['MESSAGES_UPSERT'] })
+            });
+            console.log('   Manager update status:', updateResp.status);
+            const updateData = await updateResp.json();
+            console.log('   Result:', JSON.stringify(updateData).substring(0, 200));
+        } catch (e) {
+            console.log('   ❌', e.message);
         }
 
-    } catch (error) {
-        console.error('❌ Error setting webhook:', error.message);
+        console.log('\n💡 إذا ما اشتغل, غيّره يدوي من Evolution Manager:');
+        console.log('   1. افتح http://localhost:8081/manager');
+        console.log('   2. اختر instance "lony"');
+        console.log('   3. روح قسم Webhook');
+        console.log('   4. غيّر URL إلى: http://host.docker.internal:3001/webhook');
+        console.log('   5. احفظ');
     }
 }
 
-setWebhook();
+main().catch(e => console.error('Error:', e));

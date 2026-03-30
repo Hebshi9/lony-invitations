@@ -111,7 +111,7 @@ export function getTemplateVariables(guest, event) {
     return {
         name: guest.name,
         event: event.name,
-        date: formatDate(event.date),
+        date: formatDate(event.event_date || event.date),
         location: event.location || 'سيتم الإعلان عنه',
         qr_link: `https://lonyinvit.netlify.app/check-in.html?token=${guest.qr_token}`, // Official Check-in Link
         serial: guest.serial || '',

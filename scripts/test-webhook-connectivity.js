@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 // The tunnel URL we established
-const TUNNEL_URL = 'https://fuzzy-ghosts-sink.loca.lt/webhook';
+const TUNNEL_URL = 'http://127.0.0.1:3005/webhook';
 
 async function testWebhook() {
     console.log('🧪 Testing Webhook Connectivity...');
@@ -12,12 +12,12 @@ async function testWebhook() {
         instance: "lony-whatsapp",
         data: {
             key: {
-                remoteJid: "966500000000@s.whatsapp.net",
+                remoteJid: "966507837584@s.whatsapp.net",
                 fromMe: false,
                 id: "TEST_MSG_ID"
             },
             message: {
-                conversation: "Test Message from Script"
+                conversation: "1"
             }
         }
     };

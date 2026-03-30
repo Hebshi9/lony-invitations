@@ -1,19 +1,79 @@
 import { useParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { XCircle, Clock, Calendar, Loader2, MapPin, Lock as LockIcon } from 'lucide-react';
+import { XCircle, Clock, Calendar, Loader2, MapPin, Lock as LockIcon, KeyRound, ShieldCheck, Users } from 'lucide-react';
+import { normalizePin } from '../lib/utils';
 import { hasFeature, EventFeatures } from '../lib/features';
 
-// Helper to parse date strings safely for Hijri conversion
+// --- STYLED COMPONENTS ---
+
+const CountdownTimer = ({ targetDate, onComplete }: { targetDate: Date; onComplete?: () => void }) => {
+    const [timeLeft, setTimeLeft] = useState({
+        days: 0, hours: 0, minutes: 0, seconds: 0
+    });
+
+    useEffect(() => {
+        const calculateTime = () => {
+            const now = new Date().getTime();
+            const distance = targetDate.getTime() - now;
+
+            if (distance <= 0) {
+                setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+                return true; // Finished
+            }
+
+            setTimeLeft({
+                days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+                hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+                minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+                seconds: Math.floor((distance % (1000 * 60)) / 1000)
+            });
+            return false;
+        };
+
+        calculateTime();
+        const timer = setInterval(() => {
+            if (calculateTime()) {
+                clearInterval(timer);
+                if (onComplete) onComplete();
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [targetDate, onComplete]);
+
+    const TimeUnit = ({ value, label }: { value: number, label: string }) => (
+        <div className="flex flex-col items-center">
+            <div className="bg-white border-2 border-[#E5DCC5] text-[#C5A059] w-16 h-20 md:w-24 md:h-28 rounded-3xl shadow-xl flex items-center justify-center mb-3 transform transition-all hover:scale-105 group relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#C5A059]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <span className="text-3xl md:text-5xl font-black font-mono tracking-tighter z-10">
+                    {value.toString().padStart(2, '0')}
+                </span>
+            </div>
+            <span className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-[0.2em]">{label}</span>
+        </div>
+    );
+
+    return (
+        <div className="flex justify-center items-center gap-3 md:gap-6" dir="ltr">
+            <TimeUnit value={timeLeft.days} label="أيام" />
+            <TimeUnit value={timeLeft.hours} label="ساعة" />
+            <TimeUnit value={timeLeft.minutes} label="دقيقة" />
+            <TimeUnit value={timeLeft.seconds} label="ثانية" />
+        </div>
+    );
+};
+
+// Helper to parse date strings safely
 const getSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return null;
-    // If it's just a date YYYY-MM-DD, add noon to prevent UTC shifting day
     if (dateStr.length === 10) return new Date(`${dateStr}T12:00:00`);
     return new Date(dateStr);
 };
 
 interface Guest {
     id: string;
+    event_id: string;
     name: string;
     phone?: string;
     table_no?: string;
@@ -32,13 +92,10 @@ interface Event {
     date: string;
     location?: string;
     location_maps_url?: string;
-    wifi_ssid?: string;
-    wifi_password?: string;
-    wifi_security?: 'WPA' | 'WEP' | 'nopass';
     qr_activation_enabled?: boolean;
     qr_active_from?: string;
     qr_active_until?: string;
-    start_date?: string;
+    host_pin?: string;
     features?: Partial<EventFeatures>;
 }
 
@@ -54,10 +111,38 @@ export default function GuestView() {
     const [guest, setGuest] = useState<Guest | null>(null);
     const [event, setEvent] = useState<Event | null>(null);
     const [loading, setLoading] = useState(true);
+    const [processing, setProcessing] = useState(false);
     const [scans, setScans] = useState<Scan[]>([]);
     const [currentTime, setCurrentTime] = useState(new Date());
+    const hasAutoCheckedIn = useRef(false);
+    const pinVerificationLock = useRef(false);
+    const initialStatus = useRef<'active' | 'not_started' | 'expired' | null>(null);
 
-    // Update current time every second to handle transitions
+    // PIN state
+    const [enteredPin, setEnteredPin] = useState('');
+    const [pinError, setPinError] = useState(false);
+    const [pinVerified, setPinVerified] = useState(false);
+    
+    useEffect(() => {
+        if (!qr_token) return;
+        try {
+            const sessionSaved = sessionStorage.getItem(`pin_verified_${qr_token}`);
+            const localSaved = localStorage.getItem(`pin_verified_${qr_token}`);
+            if (sessionSaved === '1' || localSaved === '1') {
+                setPinVerified(true);
+                pinVerificationLock.current = true;
+            }
+        } catch (e) { console.warn('Storage sync failed:', e); }
+    }, [qr_token]);
+
+    const isPinEntryRequired = !!(
+        event?.features?.enable_host_pin && 
+        event?.host_pin && 
+        !pinVerified && 
+        !pinVerificationLock.current && 
+        !guest?.attended
+    );
+
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
@@ -66,512 +151,418 @@ export default function GuestView() {
     useEffect(() => {
         if (qr_token) {
             fetchGuestData();
+            const poll = setInterval(() => {
+                if (document.visibilityState === 'visible') fetchGuestData();
+            }, 10000);
+            return () => clearInterval(poll);
         } else {
             setLoading(false);
         }
     }, [qr_token]);
 
     const fetchGuestData = async () => {
-        if (!qr_token) {
-            setLoading(false);
-            return;
-        }
-
-        // --- SIMULATION MODE ---
-        if (qr_token.startsWith('sim-')) {
-            const mode = qr_token.split('-')[1]; // before, during, after
-
-            // Mock Event
-            const mockEvent: Event = {
-                id: 'sim-event',
-                name: 'حفل زفاف تجريبي',
-                date: new Date().toISOString(), // Default
-                location: 'قاعة اللؤلؤة، الرياض',
-                location_maps_url: 'https://maps.google.com',
-                qr_activation_enabled: true,
-                features: {
-                    enable_simple_scan: true
-                }
-            };
-
-            // Adjust times based on mode
-            const now = new Date();
-            if (mode === 'before') {
-                mockEvent.qr_active_from = new Date(now.getTime() + 86400000).toISOString(); // Tomorrow
-                mockEvent.qr_active_until = new Date(now.getTime() + 172800000).toISOString();
-                mockEvent.date = new Date(now.getTime() + 86400000).toISOString();
-            } else if (mode === 'during') {
-                mockEvent.qr_active_from = new Date(now.getTime() - 3600000).toISOString(); // 1 hour ago
-                mockEvent.qr_active_until = new Date(now.getTime() + 86400000).toISOString(); // Tomorrow
-                mockEvent.date = new Date().toISOString();
-            } else if (mode === 'after') {
-                mockEvent.qr_active_from = new Date(now.getTime() - 172800000).toISOString(); // 2 days ago
-                mockEvent.qr_active_until = new Date(now.getTime() - 86400000).toISOString(); // Yesterday
-                mockEvent.date = new Date(now.getTime() - 86400000).toISOString();
-            }
-
-            setEvent(mockEvent);
-            setGuest({
-                id: 'sim-guest',
-                name: 'ضيف تجريبي (Demo Guest)',
-                qr_token: qr_token,
-                attended: mode === 'during',
-                table_no: 'VIP-1',
-                companions_count: 3,
-                companions_attended: 0,
-                events: mockEvent
-            });
-            setLoading(false);
-            return;
-        }
-
         try {
-            // Fetch guest data
-            const { data: guestData, error: guestError } = await supabase
-                .from('guests')
-                .select(`
-                    *,
-                    events (*)
-                `)
-                .eq('qr_token', qr_token)
-                .single();
+            setLoading(true);
+            let guestData: Guest | null = null;
+            let scansData: Scan[] | null = null;
 
-            if (guestError) throw guestError;
+            // Enhanced Simulation Matrix Logic (28+ Cases)
+            if (qr_token?.startsWith('sim-')) {
+                const now = new Date();
+                const parts = qr_token.split('-');
+                
+                // sim-[time]-[pin]-[size]-[used]
+                const timeMod = parts[1] || 'during'; 
+                const pinMod = parts[2] === 'pin';
+                const sizeMod = parseInt(parts[3]?.replace('g', '') || '1');
+                const usedMod = parseInt(parts[4] || '0');
+
+                
+                const mockEvent: Event = {
+                    id: '00000000-0000-0000-0000-000000000000',
+                    name: 'حفل زفاف لوني الملكي',
+                    date: now.toISOString().split('T')[0],
+                    qr_activation_enabled: true,
+                    qr_active_from: timeMod === 'before' ? new Date(now.getTime() + 30000).toISOString() : new Date(now.getTime() - 3600000).toISOString(),
+                    qr_active_until: timeMod === 'expired' ? new Date(now.getTime() - 60000).toISOString() : new Date(now.getTime() + 3600000).toISOString(),
+                    host_pin: '1234',
+                    features: { enable_host_pin: pinMod, qr_time_restricted: true }
+                };
+
+                const isCheckInSim = sessionStorage.getItem(`sim_attended_${qr_token}`) === 'true';
+                const effectiveUsedMod = isCheckInSim ? Math.max(1, Math.min(usedMod, sizeMod)) : Math.min(usedMod, sizeMod);
+
+                guestData = {
+                    id: '00000000-0000-0000-0000-000000000001',
+                    event_id: mockEvent.id,
+                    name: sizeMod > 1 ? `عائلة لوني (${sizeMod} أفراد)` : 'ضيف لوني المميز',
+                    qr_token: qr_token,
+                    attended: effectiveUsedMod > 0,
+                    companions_count: sizeMod - 1,
+                    companions_attended: effectiveUsedMod > 0 ? effectiveUsedMod - 1 : 0,
+                    events: mockEvent
+                };
+
+                scansData = [];
+                for (let i = 0; i < effectiveUsedMod; i++) {
+                    scansData.push({ id: `s-${i}`, guest_id: guestData.id, scanned_at: now.toISOString(), scan_type: i === 0 ? 'entry' : 'companion' });
+                }
+            } else {
+                const { data, error: guestError } = await supabase
+                    .from('guests')
+                    .select('*, events(*)')
+                    .eq('qr_token', qr_token)
+                    .single();
+
+                if (guestError) throw guestError;
+                guestData = data;
+
+                if (guestData) {
+                    const { data: sData } = await supabase
+                        .from('scans')
+                        .select('*')
+                        .eq('guest_id', guestData.id)
+                        .order('scanned_at', { ascending: false });
+                    scansData = sData;
+                }
+            }
 
             if (guestData) {
                 setGuest(guestData);
-                setEvent(guestData.events);
+                const eventData = guestData.events;
+                setEvent(eventData || null);
 
-                // Fetch scan history
-                const { data: scansData } = await supabase
-                    .from('scans')
-                    .select('*')
-                    .eq('guest_id', guestData.id)
-                    .order('scanned_at', { ascending: false });
-
-                if (scansData) {
-                    setScans(scansData);
+                // Status calculation for initialStatus ref
+                if (!initialStatus.current && eventData) {
+                    const activationEnabled = eventData.qr_activation_enabled === true;
+                    if (activationEnabled) {
+                        const nowTime = new Date();
+                        const from = getSafeDate(eventData.qr_active_from);
+                        const until = getSafeDate(eventData.qr_active_until);
+                        if (from && nowTime.getTime() < from.getTime()) initialStatus.current = 'not_started';
+                        else if (until && nowTime.getTime() > until.getTime()) initialStatus.current = 'expired';
+                        else initialStatus.current = 'active';
+                    } else {
+                        initialStatus.current = 'active';
+                    }
                 }
 
-                // Check if registration is required
-                const registrationRequired = hasFeature(guestData.events, 'enable_registration') && guestData.status === 'pending';
-                if (registrationRequired) {
-                    // Redirect to landing page for registration
-                    window.location.href = `/invite/${guestData.id}`;
-                    return;
-                }
+                if (scansData) setScans(scansData);
 
-                // AUTO CHECK-IN: Register check-in automatically on page load
-                // Only if QR is active and has remaining scans
-                const totalAllowed = 1 + (guestData.companions_count || 0);
-                const totalScanned = scansData?.length || 0;
-                const remaining = totalAllowed - totalScanned;
-
-                if (remaining > 0) {
-                    // AUTO CHECK-IN: Only if 'require_inspector_app' is FALSE
-                    // If true, we only show the view, but DO NOT check them in.
-                    if (!hasFeature(guestData.events, 'require_inspector_app')) {
-                        await performCheckIn(guestData.id, guestData.events);
+                // Auto Check-in logic
+                if (!hasAutoCheckedIn.current) {
+                    const pinRequired = eventData?.features?.enable_host_pin && eventData?.host_pin && !pinVerified;
+                    if (!pinRequired) {
+                        const totalAllowed = 1 + (guestData.companions_count || 0);
+                        const totalScannedCount = scansData?.length || 0;
+                        
+                        if (totalAllowed > totalScannedCount) {
+                            if (initialStatus.current === 'active' && !eventData?.features?.require_inspector_app) {
+                                hasAutoCheckedIn.current = true;
+                                await performCheckIn(guestData.id, eventData);
+                            } else if (initialStatus.current === 'not_started') {
+                                hasAutoCheckedIn.current = true;
+                            }
+                        }
                     }
                 }
             }
         } catch (error) {
-            console.error('Error fetching guest:', error);
+            console.error('Error:', error);
         } finally {
             setLoading(false);
         }
     };
 
     const performCheckIn = async (guestId: string, eventData: any) => {
+        const now = new Date().toISOString();
+        
+        // Simulation Mode Bypass
+        if (qr_token?.startsWith('sim-')) {
+            const nowTime = new Date().toISOString();
+            const newScan = { id: `sim-${Date.now()}`, guest_id: guestId, scanned_at: nowTime, scan_type: 'entry' };
+            sessionStorage.setItem(`sim_attended_${qr_token}`, 'true');
+            setScans(prev => [newScan, ...prev]);
+            setGuest(prev => prev ? { ...prev, attended: true, attended_at: nowTime } : prev);
+            return;
+        }
+
+        try {
+            await supabase.from('scans').insert({ guest_id: guestId, event_id: eventData?.id, scanned_at: now });
+            
+            const { data: currentGuest } = await supabase.from('guests').select('attended, companions_attended, attended_at').eq('id', guestId).single();
+            const newCompanionsAttended = currentGuest?.attended ? (currentGuest.companions_attended || 0) + 1 : (currentGuest?.companions_attended || 0);
+
+            await supabase.from('guests').update({ attended: true, attended_at: currentGuest?.attended_at || now, companions_attended: newCompanionsAttended }).eq('id', guestId);
+
+            const { data: newScans } = await supabase.from('scans').select('*').eq('guest_id', guestId).order('scanned_at', { ascending: false });
+            if (newScans) setScans(newScans);
+            setGuest(prev => prev ? { ...prev, attended: true, attended_at: now, companions_attended: newCompanionsAttended } : prev);
+        } catch (e) { console.error('Check-in error:', e); }
+    };
+
+    const handleCheckInAll = async () => {
+        if (!guest || !event || processing) return;
+        setProcessing(true);
         try {
             const now = new Date().toISOString();
+            const totalCompanions = guest.companions_count || 0;
+            await supabase.from('guests').update({ attended: true, attended_at: guest.attended_at || now, companions_attended: totalCompanions }).eq('id', guest.id);
+            setGuest(prev => prev ? { ...prev, attended: true, attended_at: prev.attended_at || now, companions_attended: totalCompanions } : prev);
+            const { data: newScans } = await supabase.from('scans').select('*').eq('guest_id', guest.id).order('scanned_at', { ascending: false });
+            if (newScans) setScans(newScans);
+        } catch (e) { console.error(e); } finally { setProcessing(false); }
+    };
 
-            // Record scan
-            const { error: scanError } = await supabase
-                .from('scans')
-                .insert({
-                    guest_id: guestId,
-                    event_id: eventData?.id,
-                    scanned_at: now,
-                    scan_type: 'entry'
-                });
-
-            if (scanError) throw scanError;
-
-            // Update guest attendance
-            const { data: currentGuest } = await supabase
-                .from('guests')
-                .select('companions_attended, attended_at')
-                .eq('id', guestId)
-                .single();
-
-            const newCompanionsAttended = (currentGuest?.companions_attended || 0) + 1;
-
-            const { error: updateError } = await supabase
-                .from('guests')
-                .update({
-                    attended: true,
-                    attended_at: currentGuest?.attended_at || now,
-                    companions_attended: newCompanionsAttended
-                })
-                .eq('id', guestId);
-
-            if (updateError) throw updateError;
-
-            // Refresh data to show updated scan
-            await fetchGuestData();
-        } catch (error) {
-            console.error('Error during auto check-in:', error);
+    const handlePinSubmit = async () => {
+        if (!event || !guest) return;
+        if (normalizePin(enteredPin) === normalizePin(event.host_pin)) {
+            pinVerificationLock.current = true;
+            setPinVerified(true);
+            setPinError(false);
+            if (qr_token) {
+                sessionStorage.setItem(`pin_verified_${qr_token}`, '1');
+                localStorage.setItem(`pin_verified_${qr_token}`, '1');
+            }
+            const totalAllowed = 1 + (guest.companions_count || 0);
+            if (totalAllowed > scans.length && !hasAutoCheckedIn.current) {
+                hasAutoCheckedIn.current = true;
+                if (!event.features?.require_inspector_app) performCheckIn(guest.id, event);
+            }
+        } else {
+            setPinError(true);
+            setEnteredPin('');
         }
     };
 
+    if (loading) return (
+        <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center">
+            <Loader2 className="w-12 h-12 text-[#C5A059] animate-spin mb-4" />
+            <p className="text-[#C5A059] font-bold">جاري تحميل الدعوة...</p>
+        </div>
+    );
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-                <div className="text-center">
-                    <Loader2 className="w-16 h-16 text-blue-600 animate-spin mx-auto mb-4" />
-                    <p className="text-gray-600 text-lg font-semibold">جاري التحميل...</p>
-                </div>
-            </div>
-        );
-    }
+    if (!guest || !event) return (
+        <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-6 text-center">
+            <XCircle className="w-16 h-16 text-red-400 mb-4" />
+            <h1 className="text-2xl font-bold text-[#2C3E50]">عذراً، الدعوة غير موجودة</h1>
+            <p className="text-gray-500 mt-2">يرجى التأكد من الرابط والمحاولة مرة أخرى.</p>
+        </div>
+    );
 
-    if (!guest || !event) {
+    if (isPinEntryRequired) {
         return (
-            <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6" dir="rtl">
-                <div className="max-w-md w-full text-center bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] p-10 shadow-xl">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-[#B57382]/10 rounded-2xl mb-8">
-                        <XCircle className="w-12 h-12 text-[#B57382]" />
+            <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6 relative overflow-hidden" dir="rtl">
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+                <div className="max-w-md w-full z-10">
+                    <div className="bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] shadow-xl p-8 md:p-12 text-center">
+                        <div className="mb-8">
+                            <div className="flex justify-center mb-6">
+                                <img src="/logo.jpg" alt="Lony Invitations" className="h-16 w-auto object-contain rounded-xl shadow-sm" />
+                            </div>
+                            <h1 className="text-2xl font-black font-serif text-[#2C3E50] mb-3">أدخل الرقم السري</h1>
+                            <p className="text-gray-500 leading-relaxed">هذه الدعوة محمية برقم سري. أدخل الرقم للمتابعة.</p>
+                        </div>
+                        <div className="mb-6">
+                            <input
+                                type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4}
+                                value={enteredPin} onChange={(e) => { setEnteredPin(e.target.value); setPinError(false); }}
+                                onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()}
+                                className={`w-full text-center text-3xl tracking-[0.5em] font-mono py-4 px-6 bg-white border-2 rounded-2xl outline-none transition-all ${pinError ? 'border-red-400 animate-shake' : 'border-[#E5DCC5] focus:border-[#C5A059]'}`}
+                                placeholder="• • • •" autoFocus
+                            />
+                            {pinError && <p className="text-red-500 text-sm mt-3 font-bold animate-pulse">❌ الرقم السري غير صحيح</p>}
+                        </div>
+                        <button
+                            onClick={handlePinSubmit} disabled={enteredPin.length === 0}
+                            className="w-full py-4 bg-gradient-to-r from-[#C5A059] to-[#D4AF37] text-white font-bold text-lg rounded-2xl shadow-lg active:scale-95 disabled:opacity-40"
+                        >
+                            <span className="flex items-center justify-center gap-2"><ShieldCheck className="w-5 h-5" /> تحقق ودخول</span>
+                        </button>
+                        <div className="mt-8 border-t border-[#E5DCC5] pt-6">
+                            <h3 className="text-lg font-bold text-[#2C3E50] font-serif">{guest.name}</h3>
+                            <p className="text-sm text-[#C5A059] font-bold mt-1">{event.name}</p>
+                        </div>
                     </div>
-                    <h1 className="text-3xl font-bold font-serif text-[#2C3E50] mb-4">دعوة غير صالحة</h1>
-                    <p className="text-gray-500 text-lg leading-relaxed">عذراً، لم نتمكن من العثور على هذه الدعوة في سجلاتنا.</p>
                 </div>
             </div>
         );
     }
 
-    // Check QR activation window
+    // Timing Logic
     const now = currentTime;
     const qrActivationEnabled = event.qr_activation_enabled === true;
-
     let qrStatus: 'active' | 'not_started' | 'expired' = 'active';
 
-    // Helper to ensure comparison is done in a consistent timezone (UTC)
     const getActivationDate = (dateStr: string | null | undefined) => {
         if (!dateStr) return null;
-        if (dateStr.includes(' ') && !dateStr.includes('T') && !dateStr.includes('+') && !dateStr.includes('Z')) {
-            return new Date(dateStr.replace(' ', 'T') + 'Z');
-        }
-        return new Date(dateStr);
+        try {
+            if (dateStr.includes(' ') && !dateStr.includes('T')) return new Date(dateStr.replace(' ', 'T') + (dateStr.includes('+') ? '' : 'Z'));
+            return new Date(dateStr);
+        } catch (e) { return null; }
     };
 
     if (qrActivationEnabled) {
-        const activeFrom = getActivationDate(event.qr_active_from);
-        const activeUntil = getActivationDate(event.qr_active_until);
-
-        if (activeFrom && now.getTime() < (activeFrom.getTime() - 500)) {
-            qrStatus = 'not_started';
-        } else if (activeUntil && now.getTime() > activeUntil.getTime()) {
-            qrStatus = 'expired';
+        let activeFrom = getActivationDate(event.qr_active_from);
+        let activeUntil = getActivationDate(event.qr_active_until);
+        if (!activeFrom && event.date) {
+            const eventDate = new Date(event.date.length === 10 ? `${event.date}T13:00:00Z` : event.date);
+            activeFrom = eventDate;
+            activeUntil = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
         }
+        if (activeFrom && now.getTime() < (activeFrom.getTime() - 500)) qrStatus = 'not_started';
+        else if (activeUntil && now.getTime() > activeUntil.getTime()) qrStatus = 'expired';
     }
 
-    // Countdown Timer Component
-    const CountdownTimer = ({ targetDate }: { targetDate: Date }) => {
-        const [timeLeft, setTimeLeft] = useState({
-            days: 0,
-            hours: 0,
-            minutes: 0,
-            seconds: 0
-        });
-
-        useEffect(() => {
-            const timer = setInterval(() => {
-                const now = new Date().getTime();
-                const distance = targetDate.getTime() - now;
-
-                if (distance <= 0) {
-                    clearInterval(timer);
-                    // No reload needed, the parent's currentTime state update will handle the transition
-                    return;
-                }
-
-                setTimeLeft({
-                    days: Math.floor(distance / (1000 * 60 * 60 * 24)),
-                    hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-                    minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
-                    seconds: Math.floor((distance % (1000 * 60)) / 1000)
-                });
-            }, 1000);
-
-            return () => clearInterval(timer);
-        }, [targetDate]);
-
-        return (
-            <div className="grid grid-cols-4 gap-2 md:gap-4 mb-6">
-                {[
-                    { label: 'يوم', value: timeLeft.days, color: 'from-[#C5A059]/10 to-[#E5DCC5]/10', border: 'border-[#C5A059]/30' },
-                    { label: 'ساعة', value: timeLeft.hours, color: 'from-[#B57382]/10 to-[#D69CA8]/10', border: 'border-[#B57382]/30' },
-                    { label: 'دقيقة', value: timeLeft.minutes, color: 'from-[#8FA08E]/10 to-[#A9B8A8]/10', border: 'border-[#8FA08E]/30' },
-                    { label: 'ثانية', value: timeLeft.seconds, color: 'from-gray-200/50 to-gray-100/50', border: 'border-gray-200' }
-                ].map((item, idx) => (
-                    <div key={idx} className={`bg-gradient-to-br ${item.color} ${item.border} border backdrop-blur-md rounded-2xl p-3 md:p-5 text-center`}>
-                        <div className="text-2xl md:text-3xl font-black text-[#2C3E50] tabular-nums">
-                            {String(item.value).padStart(2, '0')}
-                        </div>
-                        <div className="text-[10px] md:text-xs uppercase tracking-widest text-[#C5A059] mt-1 font-bold">{item.label}</div>
-                    </div>
-                ))}
-            </div>
-        );
+    const formatLocalizedDate = (dateStr: string | null | undefined) => {
+        if (!dateStr) return '';
+        const d = getSafeDate(dateStr);
+        if (!d) return dateStr.split('T')[0];
+        return new Intl.DateTimeFormat('ar-SA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(d);
     };
 
-    // Show countdown if QR not active yet
-    if (qrStatus === 'not_started') {
-        const targetDate = getActivationDate(event.qr_active_from);
-        if (!targetDate) return null; // Should not happen if qrStatus is not_started
+    // Layout Priority
+    // If we started as a countdown, we STAY as a countdown view until refresh.
+    // This is the "No Auto Transition" rule requested by USER.
+    const effectiveStatus = initialStatus.current || qrStatus;
 
+    if (effectiveStatus === 'not_started') {
+        const targetDate = getSafeDate(event.qr_active_from) || new Date(event.date);
         return (
             <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6 relative overflow-hidden" dir="rtl">
-                {/* Decorative Elements */}
-                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#B57382]/10 rounded-full blur-[120px] pointer-events-none"></div>
-
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#C5A059]/15 rounded-full blur-[120px] pointer-events-none"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
                 <div className="max-w-xl w-full z-10">
-                    <div className="bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] shadow-xl p-8 md:p-12 text-center relative">
-                        {/* Premium Header */}
-                        <div className="mb-10">
-                            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-tr from-[#C5A059] to-[#D4AF37] rounded-2xl shadow-[0_4px_20px_rgba(197,160,89,0.3)] mb-6 transform -rotate-3">
-                                <Clock className="w-10 h-10 text-white" />
+                    <div className="bg-white/90 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] shadow-2xl p-8 md:p-12 text-center relative">
+                        <div className="mb-10 text-center">
+                            <div className="flex justify-center mb-6">
+                                <img src="/logo.jpg" alt="Lony" className="h-20 w-auto object-contain rounded-xl" />
                             </div>
-                            <h1 className="text-4xl md:text-5xl font-black font-serif mb-4 text-[#2C3E50] leading-tight">
-                                نتشرف بدعوتك
-                            </h1>
-                            <div className="h-1 w-24 bg-gradient-to-r from-[#C5A059] to-[#E5DCC5] mx-auto rounded-full"></div>
+                            <h1 className="text-4xl md:text-5xl font-black font-serif mb-4 text-[#2C3E50]">نتشرف بدعوتك</h1>
+                            <div className="h-1.5 w-24 bg-[#C5A059] mx-auto rounded-full"></div>
                         </div>
-
-                        {/* Event Details Card */}
-                        <div className="bg-white/60 rounded-3xl p-6 mb-10 border border-[#E5DCC5] space-y-4">
-                            <h2 className="text-2xl font-bold font-serif text-[#C5A059] mb-2">{event.name}</h2>
-
-                            <div className="flex flex-wrap justify-center gap-6 text-[#2C3E50]">
+                        <div className="bg-white/60 rounded-[3rem] p-8 mb-10 border border-[#E5DCC5]/50 space-y-4 shadow-inner">
+                            <h2 className="text-2xl font-bold font-serif text-[#C5A059]">{event.name}</h2>
+                            <div className="flex flex-col items-center gap-3 text-[#2C3E50]">
                                 <div className="flex items-center gap-2">
-                                    <Calendar className="w-5 h-5 text-[#8FA08E]" />
-                                    <span className="text-lg">{event.date}</span>
-                                </div>
-                                <div className="flex items-center gap-2 text-[#C5A059] font-bold">
-                                    <span>{event.date ? new Intl.DateTimeFormat('ar-SA-u-ca-islamic-uma', { day: 'numeric', month: 'long', year: 'numeric' }).format(getSafeDate(event.date)!) : ''} هـ</span>
+                                    <Calendar className="w-6 h-6 text-[#C5A059]" /> 
+                                    <span className="text-xl font-medium">{formatLocalizedDate(event.date)}</span>
                                 </div>
                                 {event.location && (
                                     <div className="flex items-center gap-2">
-                                        <MapPin className="w-5 h-5 text-[#B57382]" />
-                                        <span className="text-lg">{event.location}</span>
+                                        <MapPin className="w-6 h-6 text-[#C5A059]" /> 
+                                        <span className="text-lg opacity-80">{event.location}</span>
                                     </div>
                                 )}
                             </div>
                         </div>
-
-                        {/* Countdown Section */}
-                        <div className="mb-10">
-                            <p className="text-gray-500 mb-6 uppercase tracking-widest text-sm font-bold">يفتح مسح الباركود خلال</p>
+                        <div className="mb-10 space-y-8">
+                            <p className="text-gray-400 uppercase tracking-[0.3em] text-xs font-black">يفتح مسح الباركود خلال</p>
                             <CountdownTimer targetDate={targetDate} />
                         </div>
-
-                        {/* Guest Welcome */}
-                        <div className="border-t border-[#E5DCC5] pt-8 mb-4">
-                            <p className="text-gray-500 mb-2">أهلاً بك</p>
-                            <h3 className="text-2xl font-bold text-[#2C3E50] font-serif">{guest.name}</h3>
-                            {guest.table_no && (
-                                <div className="mt-4 inline-flex items-center gap-2 bg-[#C5A059]/10 text-[#C5A059] px-6 py-2 rounded-full border border-[#C5A059]/20">
-                                    <span className="font-bold">طاولة: {guest.table_no}</span>
-                                </div>
-                            )}
+                        <div className="border-t border-[#E5DCC5]/60 pt-8 mt-4">
+                            <p className="text-gray-400 text-sm mb-2">ضيفنا الكريم</p> 
+                            <h3 className="text-3xl font-black text-[#2C3E50] font-serif">{guest.name}</h3>
                         </div>
-
-                        {/* Bottom Info */}
-                        <div className="mt-8 flex items-center justify-center gap-2 text-[#B57382]/80 text-sm">
-                            <LockIcon className="w-4 h-4" />
-                            <span>يتم تأمين الدخول حتى الموعد المحدد</span>
-                        </div>
-                    </div>
-
-                    {/* Footer Logo */}
-                    <div className="mt-12 text-center">
-                        <div className="w-12 h-12 rounded-full bg-white border border-[#E5DCC5] flex items-center justify-center mx-auto mb-4 shadow-sm text-[#C5A059]">
-                            L
-                        </div>
-                        <p className="text-gray-500 text-sm tracking-widest uppercase">
-                            بواسطة <span className="text-[#C5A059] font-bold ml-1 italic">LONY INVITATIONS</span>
-                        </p>
                     </div>
                 </div>
             </div>
         );
     }
 
-    // Show expired message if QR expired
     if (qrStatus === 'expired') {
         return (
             <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] flex flex-col items-center justify-center p-6" dir="rtl">
-                <div className="max-w-md w-full text-center bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] p-10 shadow-xl">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-gray-200/50 rounded-2xl mb-8">
-                        <Clock className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <h1 className="text-3xl font-bold font-serif text-[#2C3E50] mb-4">انتهت الصلاحية</h1>
-                    <p className="text-gray-500 text-lg mb-8">عذراً، انتهت فترة صلاحية هذه الدعوة للحدث التالي:</p>
-
-                    <div className="bg-white/60 rounded-2xl p-6 border border-[#E5DCC5]">
-                        <h2 className="text-xl font-bold font-serif text-[#C5A059] mb-2">{event.name}</h2>
-                        <p className="text-gray-500">{event.date}</p>
-                    </div>
+                <div className="max-w-md w-full text-center bg-white/90 border border-[#E5DCC5] rounded-[3rem] p-12 shadow-2xl">
+                    <div className="flex justify-center mb-10"><img src="/logo.jpg" alt="Lony" className="h-12 w-auto opacity-30" /></div>
+                    <div className="inline-flex items-center justify-center w-24 h-24 bg-gray-100 rounded-[2rem] mb-8"><Clock className="w-12 h-12 text-gray-300" /></div>
+                    <h1 className="text-3xl font-black font-serif text-[#2C3E50] mb-4">انتهت الصلاحية</h1>
+                    <p className="text-gray-400 text-lg mb-10">عذراً، لقد انتهت فترة صلاحية هذه الدعوة رسمياً.</p>
                 </div>
             </div>
         );
     }
 
     const totalAllowed = 1 + (guest.companions_count || 0);
-    const totalScanned = scans.length;
+    // Optimistic scan count: at least 1 if the guest record says attended
+    const totalScanned = Math.max(scans.length, (guest.attended || (qr_token?.startsWith('sim-') && sessionStorage.getItem(`sim_attended_${qr_token}`) === 'true')) ? 1 : 0);
     const remaining = Math.max(0, totalAllowed - totalScanned);
     const canCheckIn = remaining > 0;
 
     return (
-        <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] py-10 px-6 relative overflow-hidden" dir="rtl">
-            {/* Decorative Backgrounds */}
-            <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[60%] bg-[#C5A059]/10 rounded-full blur-[150px] pointer-events-none"></div>
-            <div className="absolute bottom-[-20%] right-[-20%] w-[60%] h-[60%] bg-[#B57382]/10 rounded-full blur-[150px] pointer-events-none"></div>
+        <div className="min-h-screen bg-[#FDFBF7] text-[#2C3E50] py-8 px-6 relative overflow-hidden" dir="rtl">
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#C5A059]/10 rounded-full blur-[120px] pointer-events-none"></div>
 
-            <div className="max-w-xl mx-auto space-y-8 z-10 relative">
-                {/* Event Header Card */}
-                <div className="bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] p-8 text-center shadow-xl">
-                    <div className="inline-flex items-center justify-center w-16 h-16 bg-[#C5A059]/10 rounded-2xl mb-4 text-[#C5A059]">
-                        <Calendar className="w-8 h-8" />
-                    </div>
-                    <h2 className="text-3xl font-black font-serif text-[#C5A059] mb-2">{event.name}</h2>
-                    <div className="flex flex-col items-center gap-1 text-gray-600">
-                        <div className="flex items-center gap-2">
-                            <Clock className="w-5 h-5 text-[#8FA08E]" />
-                            <span>{event.date}</span>
-                        </div>
-                        <div className="text-[#C5A059] text-sm font-bold">
-                            {event.date ? new Intl.DateTimeFormat('ar-SA-u-ca-islamic-uma', { day: 'numeric', month: 'long', year: 'numeric' }).format(getSafeDate(event.date)!) : ''} هـ
-                        </div>
+            <div className="max-w-xl mx-auto space-y-6 z-10 relative">
+                <div className="bg-white/90 border border-[#E5DCC5] rounded-[2rem] p-6 text-center shadow-xl">
+                    <div className="flex justify-center mb-4"><img src="/logo.jpg" alt="Lony" className="h-10 w-auto opacity-90" /></div>
+                    <h2 className="text-2xl font-black font-serif text-[#C5A059]">{event.name}</h2>
+                    <div className="flex items-center justify-center gap-3 text-xs text-gray-400 mt-2 font-bold uppercase tracking-widest">
+                        <Calendar className="w-4 h-4 text-[#C5A059]" /> <span>{formatLocalizedDate(event.date)}</span>
                     </div>
                 </div>
 
-                {/* Digital QR Card */}
-                <div className="bg-white/90 backdrop-blur-xl border border-[#E5DCC5] rounded-[3rem] p-8 md:p-12 shadow-2xl overflow-hidden relative group">
-                    {/* Status Badge */}
-                    <div className="flex justify-center mb-8">
-                        <div className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest border transition-all duration-500 ${canCheckIn
-                            ? 'bg-[#8FA08E]/10 text-[#5C6E5B] border-[#8FA08E]/20 shadow-sm'
-                            : 'bg-[#B57382]/10 text-[#915664] border-[#B57382]/20 shadow-sm'
-                            }`}>
-                            {canCheckIn ? 'تذكرة صالحة' : 'تم استهلاك التذكرة'}
+                <div className="bg-white/90 border border-[#E5DCC5] rounded-[3rem] p-8 shadow-2xl relative overflow-hidden text-center">
+                    <div className="flex justify-center mb-6">
+                        <div className={`p-6 rounded-[2rem] shadow-xl ${remaining === 0 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-[#C5A059]'}`}>
+                            {remaining === 0 ? <XCircle className="w-16 h-16" /> : <ShieldCheck className="w-16 h-16" />}
                         </div>
                     </div>
+                    <h1 className={`text-2xl font-black font-serif mb-1 ${remaining === 0 ? 'text-red-700' : 'text-[#2C3E50]'}`}>
+                        {remaining === 0 ? "تم استخدام الباركود مسبقاً" : "تم تأكيد الحضور"}
+                    </h1>
+                    <p className="text-[#C5A059] font-bold mb-6">{guest.name}</p>
 
-                    <div className="text-center mb-10">
-                        <h1 className="text-4xl font-black font-serif text-[#2C3E50] mb-2 tracking-tight">{guest.name}</h1>
-                        <p className="text-gray-500 text-lg">يسعدنا حضورك</p>
-                    </div>
-
-                    <div className="relative mb-10 flex justify-center">
-                        <div className="absolute inset-0 bg-[#C5A059]/10 blur-[60px] rounded-full opacity-50 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="relative bg-white p-6 rounded-[2.5rem] shadow-lg border border-[#E5DCC5]/50 transition-transform hover:scale-105 duration-500">
-                            <img
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + '/v/' + guest.qr_token)}&bgcolor=ffffff&color=2C3E50&margin=10`}
-                                alt="QR Code"
-                                className="w-48 h-48 md:w-56 md:h-56 mix-blend-multiply"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Details Grid */}
-                    <div className="grid grid-cols-2 gap-4 mb-8">
+                    <div className="grid grid-cols-2 gap-4 mb-6">
                         {guest.table_no && (
-                            <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E5DCC5] text-center">
-                                <p className="text-gray-500 text-xs mb-1 uppercase font-bold tracking-tighter">رقم الطاولة</p>
-                                <p className="text-2xl font-black text-[#2C3E50]">{guest.table_no}</p>
+                            <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                                <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">طاولة رقم</p>
+                                <p className="text-xl font-black text-[#2C3E50]">{guest.table_no}</p>
                             </div>
                         )}
-                        <div className="bg-[#FDFBF7] rounded-2xl p-4 border border-[#E5DCC5] text-center col-span-1">
-                            <p className="text-gray-500 text-xs mb-1 uppercase font-bold tracking-tighter">المرافقين</p>
-                            <p className="text-2xl font-black text-[#2C3E50]">{guest.companions_count || 0}</p>
+                        <div className={`bg-gray-50 rounded-2xl p-4 border border-gray-100 ${!guest.table_no ? 'col-span-2' : ''}`}>
+                            <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">عدد المرافقين</p>
+                            <p className="text-xl font-black text-[#2C3E50]">{guest.companions_count || 0}</p>
                         </div>
                     </div>
 
-                    {/* Scan Progress */}
-                    <div className={`rounded-3xl p-6 border transition-all ${canCheckIn
-                        ? 'bg-[#8FA08E]/5 border-[#8FA08E]/20'
-                        : 'bg-[#B57382]/5 border-[#B57382]/20'
-                        }`}>
+                    {remaining > 0 && (guest.companions_count || 0) > 0 && (
+                        <button
+                            onClick={handleCheckInAll} disabled={processing}
+                            className="w-full py-4 bg-[#2C3E50] text-white font-bold rounded-2xl shadow-lg active:scale-95 flex items-center justify-center gap-2 mb-4"
+                        >
+                            {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Users className="w-5 h-5" />} تسجيل دخول جميع المرافقين
+                        </button>
+                    )}
+
+                    <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
                         <div className="flex items-center justify-between mb-2">
-                            <p className="text-gray-500 text-sm font-bold">حالة الدخول</p>
-                            <p className="text-[#2C3E50] font-black">{totalScanned} / {totalAllowed}</p>
+                            <p className="text-[10px] text-gray-500 font-bold">الحاضرين حالياً</p>
+                            <p className="text-xs text-[#2C3E50] font-black">{totalScanned} من {totalAllowed}</p>
                         </div>
-                        <div className="h-3 bg-white/50 rounded-full overflow-hidden border border-[#E5DCC5]">
-                            <div
-                                className={`h-full transition-all duration-1000 ease-out ${canCheckIn ? 'bg-gradient-to-r from-[#8FA08E] to-[#6C7E6B]' : 'bg-[#B57382]'}`}
-                                style={{ width: `${(totalScanned / totalAllowed) * 100}%` }}
-                            ></div>
+                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="h-full bg-[#C5A059] transition-all duration-700" style={{ width: `${(totalScanned / totalAllowed) * 100}%` }}></div>
                         </div>
                     </div>
                 </div>
 
-                {/* Scan History - Elegant List */}
                 {scans.length > 0 && (
-                    <div className="bg-white/80 backdrop-blur-md border border-[#E5DCC5] rounded-[2.5rem] p-8 shadow-xl">
-                        <h3 className="text-xl font-bold font-serif text-[#C5A059] mb-6 flex items-center gap-3">
-                            <Clock className="w-6 h-6" />
-                            سجل الحضور
-                        </h3>
-                        <div className="space-y-4">
-                            {scans.slice(0, 5).map((scan, idx) => {
-                                const d = new Date(scan.scanned_at);
-                                return (
-                                    <div key={scan.id} className="flex items-center justify-between p-4 bg-[#FDFBF7] rounded-2xl border border-[#E5DCC5] group hover:bg-[#F9F6F0] transition-colors">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 rounded-full bg-[#8FA08E]/10 flex items-center justify-center text-[#5C6E5B] font-bold">
-                                                {scans.length - idx}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-[#2C3E50]">دخول معتمد</p>
-                                                <p className="text-xs text-gray-500 italic">بواسطة المضيف</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[#2C3E50] font-bold">{d.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</p>
-                                            <p className="text-[10px] text-gray-500">{d.toLocaleDateString('ar-SA')}</p>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                    <div className="bg-white/80 border border-[#E5DCC5] rounded-[2rem] p-6 shadow-lg">
+                        <div className="flex items-center gap-2 mb-4 text-[#C5A059]"><Clock className="w-5 h-5" /> <h3 className="font-bold">سجل الحضور</h3></div>
+                        <div className="space-y-3">
+                            {scans.slice(0, 3).map((scan, idx) => (
+                                <div key={scan.id} className="flex items-center justify-between p-3 bg-gray-50/50 rounded-xl border border-gray-100">
+                                    <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-white border border-gray-100 flex items-center justify-center text-xs font-bold text-[#2C3E50]">{scans.length - idx}</div> <span className="text-sm font-medium">دخول مفسوح</span></div>
+                                    <span className="text-xs text-gray-400">{new Date(scan.scanned_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
-
-                {/* Footer */}
-                <div className="text-center py-8 opacity-60">
-                    <div className="h-[1px] w-20 bg-gray-300 mx-auto mb-4"></div>
-                    <p className="text-[10px] tracking-[0.2em] font-black uppercase text-gray-500">Official Guest Portal • Lony Platform</p>
-                </div>
             </div>
-
-            {/* SECURITY OVERLAY */}
-            {event && hasFeature(event, 'require_inspector_app') && (
-                <div className="fixed bottom-6 left-6 right-6 z-50 animate-in slide-in-from-bottom-10 duration-700">
-                    <div className="bg-orange-500/10 backdrop-blur-2xl border border-orange-500/20 p-6 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center gap-6">
-                        <div className="bg-orange-500 p-4 rounded-2xl shadow-lg shadow-orange-500/20">
-                            <LockIcon className="w-8 h-8 text-white" />
-                        </div>
-                        <div>
-                            <h4 className="font-black text-white text-lg">وضع الأمان مفعل</h4>
-                            <p className="text-sm text-gray-400 leading-snug">صلاحية الدخول تمنح فقط عبر مسح الرمز من خلال تطبيق المنظمين الرسمي.</p>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

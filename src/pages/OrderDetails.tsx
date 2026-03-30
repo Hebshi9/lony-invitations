@@ -102,7 +102,13 @@ const OrderDetails: React.FC = () => {
                 if (el.type === 'text') {
                     if (el.label === 'اسم الضيف') div.innerText = guest.name;
                     else if (el.label === 'رقم الطاولة') div.innerText = guest.custom_fields?.table || '';
-                    else if (el.label === 'عدد المرافقين') div.innerText = `+${guest.companions_count}`;
+                    else if (el.label === 'عدد المرافقين') {
+                        if (guest.companions_count > 0) {
+                            div.innerText = `+${guest.companions_count}`;
+                        } else {
+                            div.style.display = 'none';
+                        }
+                    }
                     else if (el.label === 'الفئة') div.innerText = guest.category || '';
                     else div.innerText = el.content || '';
                 } else if (el.type === 'qr') {

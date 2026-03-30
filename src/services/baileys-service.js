@@ -50,7 +50,7 @@ class BaileysService {
             sock = makeWASocket({
                 version,
                 logger: pino({ level: 'silent' }), // Hide verbose logs
-                printQRInTerminal: false,
+                printQRInTerminal: true,
                 auth: state,
                 browser: ["Lony Invitations", "Chrome", "1.0.0"], // Simulates a desktop connection
                 connectTimeoutMs: 60000,
@@ -58,6 +58,9 @@ class BaileysService {
 
             this.clients.set(accountId, sock);
             console.log(`[Baileys] Socket created and registered for ${accountId}`);
+
+            // Credential Update Handler
+            sock.ev.on('creds.update', saveCreds);
         } catch (initErr) {
             console.error(`[Baileys] ❌ CRASH during makeWASocket for ${accountId}:`, initErr);
             throw initErr;
@@ -134,9 +137,6 @@ class BaileysService {
                 }
             }
         });
-
-        // Credential Update Handler
-        sock.ev.on('creds.update', saveCreds);
 
         // Message Delivery Status Listener
         sock.ev.on('messages.update', async (updates) => {

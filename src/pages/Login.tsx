@@ -51,11 +51,11 @@ const Login: React.FC = () => {
             <Card className="w-full max-w-md shadow-2xl">
                 <CardHeader className="text-center pb-2">
                     <div className="text-6xl mb-4">🎨</div>
-                    <CardTitle className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                        استوديو الدعوات الموحد
+                    <CardTitle className="text-3xl font-black bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent italic">
+                        بوابة لوني الآمنة
                     </CardTitle>
-                    <p className="text-gray-500 text-sm mt-2">
-                        {isSignUp ? 'أنشئ حساباً جديداً للبدء' : 'سجل دخولك للمتابعة'}
+                    <p className="text-gray-500 text-sm mt-2 font-bold">
+                        خاص بمسؤولي النظام والمصممين فقط
                     </p>
                 </CardHeader>
                 <CardContent className="pt-6">
@@ -118,37 +118,15 @@ const Login: React.FC = () => {
                             {loading ? (
                                 <>
                                     <Loader2 className="w-5 h-5 animate-spin ml-2" />
-                                    جاري المعالجة...
-                                </>
-                            ) : isSignUp ? (
-                                <>
-                                    <UserPlus className="w-5 h-5 ml-2" />
-                                    إنشاء حساب
+                                    جاري التحقق...
                                 </>
                             ) : (
                                 <>
                                     <LogIn className="w-5 h-5 ml-2" />
-                                    تسجيل الدخول
+                                    دخول الإدارة
                                 </>
                             )}
                         </Button>
-
-                        <div className="text-center pt-4 border-t">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setIsSignUp(!isSignUp);
-                                    setError('');
-                                    setSuccess('');
-                                }}
-                                className="text-blue-600 hover:text-blue-800 text-sm font-medium transition"
-                                disabled={loading}
-                            >
-                                {isSignUp
-                                    ? '← لديك حساب؟ سجل دخول'
-                                    : '→ ليس لديك حساب؟ أنشئ حساباً'}
-                            </button>
-                        </div>
                     </form>
                 </CardContent>
             </Card>

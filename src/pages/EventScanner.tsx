@@ -7,9 +7,11 @@ import { supabase } from '../lib/supabaseClient';
 import {
     CheckCircle, XCircle, RefreshCw, Activity,
     AlertCircle, Clock, Lock, Users, PieChart,
-    QrCode, Search, Menu, LogOut, ChevronRight
+    QrCode, Search, Menu, LogOut, ChevronRight,
+    Wifi, WifiOff
 } from 'lucide-react';
 import { hasFeature, EventFeatures } from '../lib/features';
+import { normalizePin } from '../lib/utils';
 
 // --- Types ---
 interface Event {
@@ -19,6 +21,7 @@ interface Event {
     date: string;
     activation_time?: string;
     features: Partial<EventFeatures>;
+    host_pin?: string;
 }
 
 interface Guest {
@@ -291,8 +294,10 @@ const EventScanner: React.FC = () => {
 
     // Handle Auth
     const handleLogin = () => {
-        // Simple static PIN for now (can be dynamic later)
-        if (pinCode === '1234') {
+        const expectedPin = event?.host_pin || '1234';
+
+        if (normalizePin(pinCode) === normalizePin(expectedPin)) {
+            // Allow access
             setIsAuthenticated(true);
             setShowAuthModal(false);
             localStorage.setItem(`lony_auth_${event?.id}`, 'true');
@@ -622,6 +627,8 @@ const EventScanner: React.FC = () => {
                             <p className="text-sm text-gray-600">أدخل رمز المرور لعرض بيانات الضيوف والاحصائيات.</p>
                             <input
                                 type="password"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 autoFocus
                                 value={pinCode}
                                 onChange={(e) => setPinCode(e.target.value)}

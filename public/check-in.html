@@ -334,10 +334,9 @@
                         activeFrom = new Date(event.qr_active_from);
                         activeUntil = new Date(event.qr_active_until);
                     } else if (event.date) {
-                        // Default: Opens at 1:00 PM on event day
+                        // Fallback: Opens at 1:00 PM on event day
                         activeFrom = new Date(event.date);
-                        activeFrom.setHours(13, 0, 0, 0); // 13:00 = 1:00 PM
-                        // Default: Closes 24 hours later
+                        activeFrom.setHours(13, 0, 0, 0);
                         activeUntil = new Date(activeFrom);
                         activeUntil.setHours(activeFrom.getHours() + 24);
                     }
@@ -353,34 +352,72 @@
                     }
                 }
 
-                // ─── PROCEED TO CHECK-IN ───
-                const scans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
-                const totalAllowed = 1 + (guest.companions_count || 0);
-                const totalScanned = scans.length;
-                const remaining = totalAllowed - totalScanned;
-
-                if (remaining > 0) {
-                    await performCheckIn(guest.id, event.id);
-                    const newScans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
-                    showSuccess(guest, event, newScans);
-                } else {
-                    showAlreadyScanned(guest, event, scans);
+                // ─── CHECK HOST PIN ───
+                const pinVerified = sessionStorage.getItem(`pin_verified_${qrToken}`);
+                const alreadyChecked = sessionStorage.getItem('just_checked');
+                if (event.features && event.features.enable_host_pin && event.host_pin && !pinVerified) {
+                    return showPinScreen(guest, event);
                 }
+
+                // ─── PROCEED TO CHECK-IN ───
+                await proceedToCheckIn(guest, event, alreadyChecked);
 
             } catch (error) {
                 showError('خطأ غير متوقع', 'حدث خطأ أثناء معالجة الطلب');
             }
         }
 
-        async function performCheckIn(guestId, eventId) {
+        async function proceedToCheckIn(guest, event, alreadyChecked = false) {
+            try {
+                const scans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
+                const totalAllowed = 1 + (guest.companions_count || 0);
+                const totalScanned = scans.length;
+                const remaining = totalAllowed - totalScanned;
+
+                if (remaining > 0 && !alreadyChecked) {
+                    // Update UI optimistically BEFORE the wait if it's better for perceived speed
+                    // But here we need the scan record to show the exact time, so we do it in order
+                    await performCheckIn(guest, event.id);
+                    sessionStorage.setItem('just_checked', '1');
+                    const newScans = await apiCall(`/scans?guest_id=eq.${guest.id}&order=scanned_at.desc`);
+                    showSuccess(guest, event, newScans);
+                } else {
+                    showAlreadyScanned(guest, event, scans);
+                }
+            } catch (err) {
+                showError('خطأ أثناء التحضير', 'حدث خطأ أثناء محاولة تسجيل الحضور');
+            }
+        }
+
+        async function performCheckIn(guest, eventId) {
+            // 1. Insert Scan
             await apiCall('/scans', {
                 method: 'POST',
                 body: JSON.stringify({
-                    guest_id: guestId,
+                    guest_id: guest.id,
                     event_id: eventId,
                     scanned_at: new Date().toISOString()
                 })
             });
+
+            // 2. Update Guest State
+            const currentAttended = guest.companions_attended || 0;
+            const newAttendedCount = guest.attended ? currentAttended + 1 : currentAttended;
+            
+            try {
+                await apiCall(`/guests?id=eq.${guest.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        attended: true,
+                        attended_at: guest.attended_at || new Date().toISOString(),
+                        companions_attended: newAttendedCount,
+                        scan_count: (guest.scan_count || 0) + 1
+                    }),
+                    headers: { 'Prefer': 'return=minimal' }
+                });
+            } catch (err) {
+                console.warn('Guest state update skipped', err);
+            }
         }
 
         // ─── UI FUNCTIONS ───
@@ -445,21 +482,41 @@
         }
 
         function showSuccess(guest, event, scans) {
+            sessionStorage.removeItem('just_checked');
             const total = 1 + (guest.companions_count || 0);
             const used = scans.length;
             const left = total - used;
+            const isPinEvent = event.features && event.features.enable_host_pin && event.host_pin;
+
+            let cardContent = `<div class="guest-card">
+                <div class="guest-name">${guest.name}</div>
+                <div class="info-row"><span class="label">الحدث</span><span class="value">${event.name}</span></div>
+                ${guest.table_no ? `<div class="info-row"><span class="label">الطاولة</span><span class="value">${guest.table_no}</span></div>` : ''}`;
+
+            if (isPinEvent) {
+                const exactDate = new Date(scans[0].scanned_at).toLocaleString('ar-SA', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                cardContent += `
+                    <div class="info-row"><span class="label">إجمالي الأفراد (سعة الدعوة)</span><span class="value">${total}</span></div>
+                    <div class="info-row"><span class="label">المسحات المسجلة (تم الدخول)</span><span class="value">${used}</span></div>
+                    <div class="info-row"><span class="label">التذاكر المتبقية</span><span class="value" style="color:${left > 0 ? 'var(--success)' : 'var(--error)'}; font-size: 18px; font-weight: 800;">${left}</span></div>
+                    <div class="info-row" style="flex-direction:column; align-items:flex-start; margin-top:12px; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
+                        <span class="label" style="margin-bottom:4px; font-size:12px;">تاريخ ووقت أحدث دخول:</span>
+                        <span class="value" style="font-size:14px; font-weight:bold; color:var(--text)">${exactDate}</span>
+                    </div>
+                 </div>`;
+            } else {
+                cardContent += `
+                    <div class="info-row"><span class="label">عدد الأفراد المسموح</span><span class="value">${total}</span></div>
+                    <div class="info-row"><span class="label">حالة الدخول</span><span class="value" style="color:var(--success)">تم تسجيل الحضور (${used})</span></div>
+                    <div class="info-row"><span class="label">المتبقي</span><span class="value" style="color:${left > 0 ? 'var(--success)' : 'var(--error)'}; font-weight: 800;">${left}</span></div>
+                 </div>`;
+            }
 
             renderLayout(
                 '<span style="color:var(--success)">✓</span>',
                 'تم تسجيل الدخول بنجاح',
                 'أهلاً بك، نتمنى لك وقتاً ممتعاً!',
-                `<div class="guest-card">
-                    <div class="guest-name">${guest.name}</div>
-                    <div class="info-row"><span class="label">الحدث</span><span class="value">${event.name}</span></div>
-                    ${guest.table_no ? `<div class="info-row"><span class="label">الطاولة</span><span class="value">${guest.table_no}</span></div>` : ''}
-                    <div class="info-row"><span class="label">المرافقين</span><span class="value">${used} / ${total}</span></div>
-                    <div class="info-row"><span class="label">المتبقي</span><span class="value" style="color:${left > 0 ? 'var(--success)' : 'var(--error)'}">${left}</span></div>
-                 </div>
+                `${cardContent}
                  <div class="history-section">
                     <div class="history-title">سجل الدخول</div>
                     ${scans.map(s => `<span class="scan-pill">🕒 ${new Date(s.scanned_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</span>`).join('')}
@@ -468,15 +525,33 @@
         }
 
         function showAlreadyScanned(guest, event, scans) {
+            if (qrToken) sessionStorage.removeItem(`pin_verified_${qrToken}`);
+            const isPinEvent = event.features && event.features.enable_host_pin && event.host_pin;
+
+            let cardContent = `<div class="guest-card">
+                <div class="guest-name">${guest.name}</div>`;
+
+            if (isPinEvent) {
+                const exactDate = new Date(scans[0].scanned_at).toLocaleString('ar-SA', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                cardContent += `
+                    <div class="info-row"><span class="label">إجمالي المسحات المسجلة (حتى الآن)</span><span class="value">${scans.length}</span></div>
+                    <div class="info-row" style="flex-direction:column; align-items:flex-start; margin-top:8px; border-top:1px dashed #e2e8f0; padding-top:8px;">
+                        <span class="label" style="margin-bottom:4px; font-size:12px; color:var(--error)">تاريخ ووقت آخر مسحة مسجلة:</span>
+                        <span class="value" style="font-size:14px; font-weight:bold; color:var(--text)">${exactDate}</span>
+                    </div>
+                 </div>`;
+            } else {
+                cardContent += `
+                    <div class="info-row"><span class="label">مرات الدخول</span><span class="value">${scans.length}</span></div>
+                    <div class="info-row"><span class="label">آخر دخول</span><span class="value">${new Date(scans[0].scanned_at).toLocaleString('ar-SA')}</span></div>
+                 </div>`;
+            }
+
             renderLayout(
                 '<span style="color:var(--error)">✕</span>',
                 'تم استخدام الدعوة مسبقاً',
                 'عذراً، تم استهلاك جميع مرات الدخول المتاحة',
-                `<div class="guest-card">
-                    <div class="guest-name">${guest.name}</div>
-                    <div class="info-row"><span class="label">مرات الدخول</span><span class="value">${scans.length}</span></div>
-                    <div class="info-row"><span class="label">آخر دخول</span><span class="value">${new Date(scans[0].scanned_at).toLocaleString('ar-SA')}</span></div>
-                 </div>`
+                cardContent
             );
         }
 
@@ -487,6 +562,73 @@
                     <h1 style="color:var(--error)">${title}</h1>
                     <p style="color:var(--text-light)">${msg}</p>
                 </div>`;
+        }
+
+        function showPinScreen(guest, event) {
+            renderLayout(
+                '🔐',
+                'أدخل الرقم السري',
+                'هذه الدعوة محمية. أدخل الرقم السري للمتابعة.',
+                `<div class="guest-card" style="text-align:center">
+                    <div class="guest-name">${guest.name}</div>
+                    <div style="margin-bottom:16px">
+                        <input type="password" id="pinInput" maxlength="6" 
+                            style="width:80%; text-align:center; font-size:28px; letter-spacing:0.5em; padding:12px; border:2px solid #e2e8f0; border-radius:12px; outline:none; font-family:monospace;"
+                            placeholder="• • • •" />
+                    </div>
+                    <p id="pinError" style="color:var(--error); display:none; margin-bottom:12px; font-weight:bold;">❌ الرقم السري غير صحيح</p>
+                    <button id="pinSubmit" style="width:80%; padding:14px; background:var(--primary); color:white; border:none; border-radius:12px; font-size:16px; font-weight:bold; cursor:pointer; font-family:'Cairo',sans-serif;">🔓 تحقق ودخول</button>
+                 </div>`
+            );
+
+            const pinInput = document.getElementById('pinInput');
+            const pinSubmit = document.getElementById('pinSubmit');
+            const pinError = document.getElementById('pinError');
+            let isProcessing = false;
+
+            pinInput.focus();
+            pinInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') verifyPin();
+            });
+            pinSubmit.addEventListener('click', verifyPin);
+
+            // Normalize Arabic digits
+            function normalizePin(p) {
+                if (!p) return '';
+                const arabicNumbers = [/٠/g, /١/g, /٢/g, /٣/g, /٤/g, /٥/g, /٦/g, /٧/g, /٨/g, /٩/g];
+                let normalized = String(p);
+                for (let i = 0; i < 10; i++) {
+                    normalized = normalized.replace(arabicNumbers[i], i.toString());
+                }
+                return normalized.trim();
+            }
+
+            async function verifyPin() {
+                if (isProcessing) return;
+                const entered = pinInput.value;
+                if (!entered) return;
+                
+                if (normalizePin(entered) === normalizePin(event.host_pin)) {
+                    isProcessing = true;
+                    pinSubmit.innerHTML = '✅ جاري التحميل...';
+                    pinSubmit.style.background = 'var(--success)';
+                    pinSubmit.style.opacity = '0.9';
+                    pinError.style.display = 'none';
+
+                    // PIN correct — Persist in session and proceed DIRECTLY
+                    sessionStorage.setItem(`pin_verified_${qrToken}`, '1');
+                    
+                    // Direct transition - no reload!
+                    proceedToCheckIn(guest, event);
+                } else {
+                    pinError.textContent = '❌ الرقم السري غير صحيح';
+                    pinError.style.display = 'block';
+                    pinInput.value = '';
+                    pinInput.style.borderColor = 'var(--error)';
+                    pinInput.focus();
+                    setTimeout(() => { pinInput.style.borderColor = '#e2e8f0'; }, 1500);
+                }
+            }
         }
 
         init();

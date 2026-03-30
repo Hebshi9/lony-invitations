@@ -39,6 +39,21 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
         };
     });
 
+    // WhatsApp Automation Settings State
+    const [whatsappSettings, setWhatsappSettings] = useState(() => {
+        const defaults = {
+            enable_48h_report: true,
+            enable_no_reply_reminder: true,
+            enable_pre_event_reminder: true,
+            pre_event_reminder_days: 2,
+            enable_direct_send: false
+        };
+        if (initialEvent?.settings?.whatsapp_settings) {
+            return { ...defaults, ...initialEvent.settings.whatsapp_settings };
+        }
+        return defaults;
+    });
+
     useEffect(() => {
         if (initialEvent) {
             setName(initialEvent.name || '');
@@ -64,6 +79,18 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
     const handleSubmit = async () => {
         if (!name || !date) {
             setMessage('الرجاء تعبئة الحقول المطلوبة');
+            return;
+        }
+
+        // Validate: activation time required when time restriction is enabled
+        if (features.qr_time_restricted && !activationTime) {
+            setMessage('⚠️ يجب تحديد وقت تفعيل الباركود عند تفعيل التقييد الزمني');
+            return;
+        }
+
+        // Validate: Host PIN required when PIN feature is enabled
+        if (features.enable_host_pin && (!hostPin || hostPin.length < 4)) {
+            setMessage('⚠️ يجب إدخال رقم سري مكون من 4 أرقام على الأقل');
             return;
         }
 
@@ -100,7 +127,7 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                         qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
                         qr_activation_enabled: !!features.qr_time_restricted,
                         country, features: features,
-                        settings: { qr_fields: { ...qrSettings, show_custom: [] }, portal_settings: {} }
+                        settings: { ...initialEvent.settings, qr_fields: { ...qrSettings, show_custom: [] }, whatsapp_settings: whatsappSettings, portal_settings: {} }
                     })
                     .eq('id', initialEvent.id);
                 error = updateError;
@@ -116,7 +143,7 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                         qr_active_until: activationTimestamp ? new Date(new Date(activationTimestamp).getTime() + 24 * 60 * 60 * 1000).toISOString() : null,
                         qr_activation_enabled: !!features.qr_time_restricted,
                         country, features: features,
-                        settings: { qr_fields: { ...qrSettings, show_custom: [] }, portal_settings: {} }
+                        settings: { qr_fields: { ...qrSettings, show_custom: [] }, whatsapp_settings: whatsappSettings, portal_settings: {} }
                     });
                 error = insertError;
             }
@@ -127,6 +154,7 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                 setGeneratedToken(token);
                 setName(''); setDate(''); setVenue(''); setActivationTime(''); setOpeningTime('13:00'); setHostPin(''); setFeatures(DEFAULT_FEATURES);
                 setQrSettings({ show_name: true, show_table: true, show_companions: true, show_category: false });
+                setWhatsappSettings({ enable_48h_report: true, enable_no_reply_reminder: true, enable_pre_event_reminder: true, pre_event_reminder_days: 2 });
             }
 
             setMessage(initialEvent ? 'تم تحديث الحدث بنجاح' : 'تم إنشاء الحدث بنجاح');
@@ -329,6 +357,87 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                                     className="w-5 h-5 text-lony-navy rounded focus:ring-lony-gold"
                                 />
                             </label>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="border-none shadow-xl bg-white/80 backdrop-blur">
+                        <CardHeader className="border-b border-gray-100 pb-4">
+                            <CardTitle className="text-xl text-lony-navy flex items-center gap-2">
+                                <CheckCircle className="w-5 h-5 text-lony-gold" />
+                                إعدادات الأتمتة والواتساب
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4 pt-6">
+                            <p className="text-sm text-gray-500 mb-4">اختر الخصائص التلقائية التي تود تفعيلها لهذه المناسبة:</p>
+
+                            <label className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                                <div>
+                                    <span className="block font-medium text-gray-700">تقرير الـ 48 ساعة</span>
+                                    <span className="block text-xs text-gray-500">إرسال تقرير ملخص لصاحب المناسبة بعد 48 ساعة من الإطلاق</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={whatsappSettings.enable_48h_report}
+                                    onChange={(e) => setWhatsappSettings({ ...whatsappSettings, enable_48h_report: e.target.checked })}
+                                    className="w-5 h-5 text-lony-navy rounded focus:ring-lony-gold"
+                                />
+                            </label>
+
+                            <label className="flex items-center justify-between p-3 bg-white border border-lony-gold/20 rounded-lg cursor-pointer hover:bg-lony-gold/5 transition-colors">
+                                <div className="flex-1">
+                                    <span className="block font-semibold text-lony-navy">نمط الإرسال المباشر (بدون اعتذار)</span>
+                                    <span className="block text-xs text-gray-500">إرسال كرت الدعوة فوراً للضيف دون طلب تأكيد أو اعتذار</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={whatsappSettings.enable_direct_send}
+                                    onChange={(e) => setWhatsappSettings({ ...whatsappSettings, enable_direct_send: e.target.checked })}
+                                    className="w-5 h-5 text-lony-navy rounded focus:ring-lony-gold ml-3"
+                                />
+                            </label>
+
+                            <label className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+                                <div>
+                                    <span className="block font-medium text-gray-700">تذكير "عدم الرد"</span>
+                                    <span className="block text-xs text-gray-500">مراسلة الضيوف الذين لم يجيبوا بعد 24 ساعة للرد بنعم أو لا</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={whatsappSettings.enable_no_reply_reminder}
+                                    onChange={(e) => setWhatsappSettings({ ...whatsappSettings, enable_no_reply_reminder: e.target.checked })}
+                                    className="w-5 h-5 text-lony-navy rounded focus:ring-lony-gold"
+                                />
+                            </label>
+
+                            <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+                                <label className="flex items-center justify-between cursor-pointer">
+                                    <div>
+                                        <span className="block font-medium text-gray-700">تذكير المؤكدين قبل المناسبة</span>
+                                        <span className="block text-xs text-gray-500">إرسال تذكير أوتوماتيكي للضيوف المؤكدين بموعد المناسبة</span>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={whatsappSettings.enable_pre_event_reminder}
+                                        onChange={(e) => setWhatsappSettings({ ...whatsappSettings, enable_pre_event_reminder: e.target.checked })}
+                                        className="w-5 h-5 text-lony-navy rounded focus:ring-lony-gold"
+                                    />
+                                </label>
+
+                                {whatsappSettings.enable_pre_event_reminder && (
+                                    <div className="flex items-center gap-3 pt-2 border-t border-gray-200 mt-2">
+                                        <span className="text-sm font-medium text-gray-600">قبل</span>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="14"
+                                            value={whatsappSettings.pre_event_reminder_days}
+                                            onChange={(e) => setWhatsappSettings({ ...whatsappSettings, pre_event_reminder_days: parseInt(e.target.value) || 2 })}
+                                            className="w-20 px-3 py-1 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-lony-gold"
+                                        />
+                                        <span className="text-sm font-medium text-gray-600">أيام من موعد الحدث</span>
+                                    </div>
+                                )}
+                            </div>
                         </CardContent>
                     </Card>
 

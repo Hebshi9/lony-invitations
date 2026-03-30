@@ -18,7 +18,11 @@ export const downloadGuestsExcel = (guests: Guest[], eventName: string) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Guests");
-    XLSX.writeFile(workbook, `${eventName}_guests.xlsx`);
+    
+    // Use XLSX.write and saveAs for better control
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `${eventName}_guests.xlsx`);
 };
 
 export const downloadLinksCsv = (guests: Guest[], eventName: string) => {
@@ -121,6 +125,10 @@ export const downloadQrZip = async (guests: Guest[], eventName: string) => {
 
     await Promise.all(promises);
 
-    const content = await zip.generateAsync({ type: "blob" });
+    const content = await zip.generateAsync({ 
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+    });
     saveAs(content, `${eventName}_qr_codes.zip`);
 };

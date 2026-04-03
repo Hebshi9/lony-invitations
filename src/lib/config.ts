@@ -9,9 +9,9 @@ const getApiUrl = () => {
     // 1. Fallback: Localhost or Primary VPS
     const host = window.location.hostname;
     
-    // If we are on localhost, use the same host but port 3001
+    // If we are on localhost, use the proxy defined in vite.config.js
     if (host === 'localhost' || host === '127.0.0.1') {
-        return `http://${host}:3001/api/whatsapp`;
+        return `/api/remote-whatsapp`;
     }
 
     // Default to the proxy when deployed to bypass Mixed Content/CORS

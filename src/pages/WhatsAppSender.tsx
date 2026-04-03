@@ -976,7 +976,7 @@ export default function WhatsAppSender() {
                                 <div className="grid grid-cols-1 gap-6">
                                     {/* Smart Editor (Moved to top for full width view) */}
                                     {/* Bottom: Table (Full Width) */}
-                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col min-h-[800px]">
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col min-h-[800px] order-2">
                                         <div className="p-4 border-b bg-gray-50 flex flex-col sm:flex-row gap-4 justify-between items-center shrink-0">
                                             <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
                                                 <User className="w-4 h-4 text-gray-400" />
@@ -1033,7 +1033,7 @@ export default function WhatsAppSender() {
                                     </div>
 
                                     {/* Right: Smart Editor */}
-                                    <div className="w-full flex flex-col gap-4">
+                                    <div className="w-full flex flex-col gap-4 order-1">
                                         {!selectedEventId ? (
                                             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
                                                 <Bot className="w-16 h-16 mb-4 opacity-10" />

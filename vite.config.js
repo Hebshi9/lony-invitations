@@ -12,6 +12,18 @@ export default defineConfig({
   ],
   server: {
     host: true,
+    proxy: {
+      '/api/remote-whatsapp': {
+        target: 'http://62.171.172.76:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/remote-whatsapp/, '/api/whatsapp')
+      },
+      '/api/remote-sales': {
+        target: 'http://62.171.172.76:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/remote-sales/, '/api/sales')
+      }
+    },
     hmr: {
       overlay: true,
       timeout: 5000,

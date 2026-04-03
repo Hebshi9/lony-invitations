@@ -233,12 +233,18 @@ async function discoverActiveInstance() {
             return name === targetInstanceName.toLowerCase();
         });
 
-        // FALLBACK: If the exact target is not found (because user added random accounts from UI), pick the first OPEN instance
-        if (!targetInstance) {
-            targetInstance = instancesList.find(inst => {
-                const status = inst.connectionStatus || inst.state || inst.status || '';
+        const isTargetOpen = targetInstance && ['open', 'connected'].includes((targetInstance.connectionStatus || targetInstance.state || targetInstance.status || '').toLowerCase());
+
+        // FALLBACK: If the exact target is not found OR it's disconnected, pick ANY open instance
+        if (!isTargetOpen) {
+            const fallbackInstance = instancesList.find(inst => {
+                const status = (inst.connectionStatus || inst.state || inst.status || '').toLowerCase();
                 return status === 'open' || status === 'connected';
             });
+            if (fallbackInstance) {
+                console.log(`✨ Fallback: Using ${fallbackInstance.name} because main target is missing or disconnected.`);
+                targetInstance = fallbackInstance;
+            }
         }
 
         if (targetInstance) {

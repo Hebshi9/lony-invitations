@@ -48,13 +48,13 @@ const supabase = createClient(
     process.env.VITE_SUPABASE_ANON_KEY
 );
 
-// Job State Management
+// Job State Management & Global Message Queue
 let jobState = {
     isRunning: false,
     isPaused: false,
     eventId: null,
     accountId: null,
-    autoFollowup: true, // Default to true
+    autoFollowup: true,
     stats: {
         pending: 0,
         sent: 0,
@@ -62,8 +62,82 @@ let jobState = {
         queued: 0
     },
     lastLog: null,
-    shouldStop: false // signal to stop
+    shouldStop: false
 };
+
+const preparingLocks = new Set();
+
+// --- GLOBAL MESSAGE QUEUE (ANTI-BAN & COLLISION PREVENTION) ---
+// This queue ensures webhook replies and batch campaigns NEVER execute at the exact same millisecond.
+class MessageQueueManager {
+    constructor() {
+        this.queue = [];
+        this.isProcessing = false;
+        this.lockedMessageIds = new Set(); // Prevents double queuing of the same message ID
+    }
+
+    // Add item to queue (types: 'batch', 'webhook_priority')
+    push(item) {
+        // Prevent double queuing of batch items
+        if (item.messageId) {
+            if (this.lockedMessageIds.has(item.messageId)) {
+                console.log(`[Queue] ⚠️ Message ${item.messageId} is already in the queue. Skipping duplicate.`);
+                return;
+            }
+            this.lockedMessageIds.add(item.messageId);
+        }
+
+        if (item.priority === 'high') {
+            // High priority (like webhook QR cards) jump to the front of the queue, but behind the currently processing item.
+            // Wait! If we unshift it, it will be pulled next.
+            this.queue.unshift(item);
+        } else {
+            this.queue.push(item);
+        }
+        
+        console.log(`[Queue] 📥 Item added (${item.type}). Queue length: ${this.queue.length}`);
+        
+        // Asynchronously start processing if not already running
+        if (!this.isProcessing) {
+            this.processNext();
+        }
+    }
+
+    async processNext() {
+        if (this.isProcessing) return;
+        if (this.queue.length === 0) {
+            this.lockedMessageIds.clear(); // Safe to clean up memory when empty
+            return;
+        }
+
+        this.isProcessing = true;
+        const item = this.queue.shift();
+
+        try {
+            console.log(`[Queue] ⚙️ Processing item type: ${item.type}...`);
+            await item.execute();
+            if (item.messageId) this.lockedMessageIds.delete(item.messageId);
+        } catch (e) {
+            console.error(`[Queue] ❌ Error executing item:`, e.message);
+            if (item.messageId) this.lockedMessageIds.delete(item.messageId);
+        } finally {
+            this.isProcessing = false;
+            // Recursively process next
+            if (this.queue.length > 0) {
+                // Short break between queue reads to yield event loop
+                setTimeout(() => this.processNext(), 100);
+            }
+        }
+    }
+    
+    clear() {
+        this.queue = [];
+        this.lockedMessageIds.clear();
+        this.isProcessing = false;
+    }
+}
+
+const globalQueue = new MessageQueueManager();
 
 // --- Persistent Logging Helper ---
 const logFile = require('path').join(process.cwd(), 'whatsapp_activity.log');
@@ -108,6 +182,31 @@ function normalizePhone(phone) {
         clean = '966' + clean;
     }
     return clean;
+}
+
+// --- Anti-Ban Spintax Helper (Text Masking) ---
+function applySpintax(text) {
+    if (!text) return '';
+    // 1. Invisible characters (Zero-width space) randomly inserted to change text hash
+    const zws = '\u200B';
+    // 2. Minor random emoji/punctuation variance
+    const variations = [
+        '{| }', '{.|..|...}', '{✨|🌟|⭐| |}', '{\n|\n\n}', '{🌹|🌸|🤍|}'
+    ];
+    
+    let spintaxed = text;
+    // Replace standard Spintax formats {a|b|c} if they exist in the template
+    const spintaxRegex = /{([^{}]*)}/g;
+    spintaxed = spintaxed.replace(spintaxRegex, (match, contents) => {
+        const parts = contents.split('|');
+        return parts[Math.floor(Math.random() * parts.length)];
+    });
+
+    // Automatically append an invisible hash-breaker at the end
+    const hashes = ['\u200B', '\u200C', '\u200D', '\uFEFF'];
+    const randomHash = hashes[Math.floor(Math.random() * hashes.length)].repeat(Math.floor(Math.random() * 3) + 1);
+    
+    return spintaxed + randomHash;
 }
 
 /**
@@ -1315,45 +1414,67 @@ app.post('/webhook', async (req, res) => {
 
                     // Always send the card (even if sent before)
                     if (guest.card_image_url) {
-                        console.log(`[RSVP] 📤 Sending card to ${guest.name}...`);
+                        console.log(`[RSVP] 📬 Queueing priority card for ${guest.name}...`);
                         const reply = `تم تأكيد حضورك يا ${guest.name} ✅\n\nهذا كرت الدخول الخاص بك. يرجى إبرازه عند الوصول 🌹`;
-                        const sendRes = await callEvolutionWithInstance(`/message/sendMedia`, accountId, 'POST', {
-                            number: phone,
-                            mediatype: "image",
-                            caption: reply,
-                            media: guest.card_image_url,
-                            fileName: 'invitation_card.png'
-                        });
+                        
+                        globalQueue.push({
+                            type: 'webhook_card',
+                            priority: 'high',
+                            execute: async () => {
+                                const sendRes = await callEvolutionWithInstance(`/message/sendMedia`, accountId, 'POST', {
+                                    number: phone,
+                                    options: { delay: 3000, presence: "composing" },
+                                    mediatype: "image",
+                                    caption: reply,
+                                    media: guest.card_image_url,
+                                    fileName: 'invitation_card.png'
+                                });
 
-                        if (sendRes && sendRes.key) {
-                            await supabase.from('whatsapp_messages').insert({
-                                event_id: guest.event_id,
-                                guest_id: guest.id,
-                                phone: phone,
-                                message_text: reply,
-                                image_url: guest.card_image_url,
-                                message_phase: 'qr_code',
-                                status: 'sent',
-                                sent_at: new Date().toISOString(),
-                                evolution_message_id: sendRes.key.id
-                            });
-                        }
+                                if (sendRes && sendRes.key) {
+                                    await supabase.from('whatsapp_messages').insert({
+                                        event_id: guest.event_id,
+                                        guest_id: guest.id,
+                                        phone: phone,
+                                        message_text: reply,
+                                        image_url: guest.card_image_url,
+                                        message_phase: 'qr_code',
+                                        status: 'sent',
+                                        sent_at: new Date().toISOString(),
+                                        evolution_message_id: sendRes.key.id
+                                    });
+                                }
+                            }
+                        });
                     } else {
                         persistLog(`[RSVP] ⚠️ ${guest.name} confirmed but card_image_url is NULL`);
-                        await callEvolutionWithInstance(`/message/sendText`, accountId, 'POST', {
-                            number: phone,
-                            text: `تم تأكيد حضورك يا ${guest.name} ✅ سيصلك كرت الدخول قريباً 🌹`
+                        globalQueue.push({
+                            type: 'webhook_text',
+                            priority: 'high',
+                            execute: async () => {
+                                await callEvolutionWithInstance(`/message/sendText`, accountId, 'POST', {
+                                    number: phone,
+                                    options: { delay: 3000, presence: "composing" },
+                                    text: `تم تأكيد حضورك يا ${guest.name} ✅ سيصلك كرت الدخول قريباً 🌹`
+                                });
+                            }
                         });
                     }
                 }
 
                 // === DECLINED: Short apology ===
                 if (rsvpStatus === 'declined') {
-                    await callEvolutionWithInstance(`/message/sendText`, accountId, 'POST', {
-                        number: phone,
-                        text: `تم قبول اعتذارك يا ${guest.name} 😔 نتمنى نشوفك في مناسبة قادمة 🌹`
+                    globalQueue.push({
+                        type: 'webhook_text',
+                        priority: 'high',
+                        execute: async () => {
+                            await callEvolutionWithInstance(`/message/sendText`, accountId, 'POST', {
+                                number: phone,
+                                options: { delay: 2000, presence: "composing" },
+                                text: `تم قبول اعتذارك يا ${guest.name} 😔 نتمنى نشوفك في مناسبة قادمة 🌹`
+                            });
+                            await recordDeclineSilently(guest.event_id);
+                        }
                     });
-                    await recordDeclineSilently(guest.event_id);
                 }
 
                 // Notify event owner
@@ -1688,7 +1809,7 @@ async function processPreEventReminders() {
 // Bulk Sending Logic
 app.post('/api/whatsapp/send-batch', async (req, res) => {
     try {
-        const { eventId, mode = 'balanced', useButtons = true, accountId = null, autoFollowup = true } = req.body;
+        const { eventId, mode = 'balanced', useButtons = true, accountId = null, autoFollowup = true, target = 'pending', limit = 0, chunkSize = 20, restDelayMinutes = 5 } = req.body;
 
         if (jobState.isRunning) return res.status(400).json({ success: false, error: 'Job already running' });
 
@@ -1707,8 +1828,6 @@ app.post('/api/whatsapp/send-batch', async (req, res) => {
             account = { id: accountId || 'default', phone: 'Unknown' };
         }
 
-        // CRITICAL FIX: Always discover the real Evolution instance name
-        // DB stores UUID but Evolution knows instance by name (e.g. 'lony')
         const discoveredInstance = await discoverActiveInstance();
         if (discoveredInstance) {
             console.log(`✨ Using discovered Evolution instance: "${discoveredInstance}" (DB account: ${account.id})`);
@@ -1718,22 +1837,30 @@ app.post('/api/whatsapp/send-batch', async (req, res) => {
             console.log(`⚠️ Could not discover instance. Using DB ID: ${account.id}`);
         }
 
-        console.log(`🚀 Starting Batch. Evolution Instance: ${account.evolutionInstanceName} | DB Account: ${account.id} (${account.phone})`);
+        console.log(`🚀 Starting Batch. Instance: ${account.evolutionInstanceName} | Target: ${target} | Limit: ${limit}`);
 
+        // 2. Get target messages (Delta Sending & Chunking)
+        let query = supabase.from('whatsapp_messages')
+            .select('id, guest_id, phone, message_text, image_url, guests (name)')
+            .eq('event_id', eventId);
+        
+        if (target === 'failed') {
+            query = query.eq('status', 'failed');
+        } else if (target === 'pending') {
+            query = query.eq('status', 'pending');
+        } else if (target === 'specific' && req.body.guestIds) {
+            query = query.in('guest_id', req.body.guestIds);
+        }
 
-        // 2. Get pending messages
-        const { data: messages } = await supabase
-            .from('whatsapp_messages')
-            .select(`
-            id, guest_id, phone, message_text, image_url,
-            guests (name)
-        `)
-            .eq('event_id', eventId)
-            .eq('status', 'pending');
+        if (limit > 0) {
+            query = query.limit(limit);
+        }
 
-        if (!messages?.length) return res.status(400).json({ error: 'No pending messages for this event. Prepare them first.' });
+        const { data: messages } = await query;
 
-        // 3. Start Job
+        if (!messages?.length) return res.status(400).json({ error: 'No messages found for this target. Prepare them first.' });
+
+        // 3. Start Job State
         jobState = {
             isRunning: true,
             isPaused: false,
@@ -1744,122 +1871,132 @@ app.post('/api/whatsapp/send-batch', async (req, res) => {
                 pending: messages.length,
                 sent: 0,
                 failed: 0,
-                queued: 0
+                queued: messages.length
             },
-            lastLog: 'Starting Evolution Batch...',
+            lastLog: `Queued ${messages.length} messages (${mode} mode) ...`,
             shouldStop: false
         };
 
-        // Async process
-        (async () => {
-            const waitTime = getSpeedDelay(mode);
+        const waitTime = getSpeedDelay(mode);
 
-            for (const msg of messages) {
-                if (jobState.shouldStop) break;
-                while (jobState.isPaused) await delay(1000);
+        // 4. Enqueue all fetched messages into Global Queue
+        for (const msg of messages) {
+            globalQueue.push({
+                type: 'batch',
+                priority: 'normal',
+                messageId: msg.id,
+                execute: async () => {
+                    if (jobState.shouldStop) {
+                        jobState.isRunning = false;
+                        return;
+                    }
+                    while (jobState.isPaused) await delay(1000);
 
-                try {
-                    const number = normalizePhone(msg.phone);
-                    const jid = number; // Evolution V2 prefers plain numbers
-                    const guestName = msg.guests?.name || 'Guest';
-
-                    // --- [G2: Number Validation] ---
-                    let isNumberValid = true;
                     try {
-                        console.log(`[Batch] 🔍 Verifying number ${jid}...`);
-                        const checkRes = await callEvolutionWithInstance('/chat/whatsappNumbers', account.evolutionInstanceName, 'POST', {
-                            numbers: [jid]
-                        });
+                        const number = normalizePhone(msg.phone);
+                        const jid = number;
+                        const guestName = msg.guests?.name || 'Guest';
 
-                        // Evolution typically returns an array: [{ exists: true/false, jid: '...', number: '...' }]
-                        // or an object if single. Handle both safely.
-                        const resData = Array.isArray(checkRes) ? checkRes[0] : checkRes;
-                        if (resData && resData.exists === false) {
-                            isNumberValid = false;
+                        // [G2: Number Validation]
+                        let isNumberValid = true;
+                        try {
+                            console.log(`[Batch] 🔍 Verifying number ${jid}...`);
+                            const checkRes = await callEvolutionWithInstance('/chat/whatsappNumbers', account.evolutionInstanceName, 'POST', { numbers: [jid] });
+                            const resData = Array.isArray(checkRes) ? checkRes[0] : checkRes;
+                            if (resData && resData.exists === false) {
+                                isNumberValid = false;
+                            }
+                        } catch (checkErr) {
+                            console.log(`[Batch] ⚠️ Verification check failed, will try to send anyway...`);
                         }
-                    } catch (checkErr) {
-                        console.log(`[Batch] ⚠️ Verification check failed (API error), will try to send anyway...`, checkErr.message);
+
+                        if (!isNumberValid) {
+                            console.log(`[Batch] ❌ Invalid WhatsApp Number: ${number}. Skipping.`);
+                            jobState.stats.failed++;
+                            jobState.stats.pending--;
+                            jobState.lastLog = `Invalid Number: ${guestName}`;
+                            await supabase.from('whatsapp_messages').update({
+                                status: 'failed', delivery_status: 'invalid_number', error_log: 'Number not registered', sent_at: new Date().toISOString()
+                            }).eq('id', msg.id);
+                            return; // Process next in queue
+                        }
+
+                        // [🚨 ANTI-BAN: BATCH REST LOGIC]
+                        const safeChunkSize = parseInt(chunkSize, 10) || 20;
+                        if (jobState.stats.sent > 0 && jobState.stats.sent % safeChunkSize === 0) {
+                            const restTime = parseInt(restDelayMinutes, 10) * 60 * 1000 || 300000;
+                            console.log(`[Campaign] ☕ استراحة المحاكاة الزمنية لمدة ${Math.round(restTime/1000)} ثانية...`);
+                            jobState.lastLog = `Taking human rest for ${Math.round(restTime/60000)}m...`;
+                            jobState.isResting = true;
+                            await delay(restTime);
+                            jobState.isResting = false;
+                        }
+
+                        // Build & Spintax text
+                        let finalText = msg.message_text || '';
+                        if (useButtons && !finalText.includes('1') && !finalText.includes('تأكيد')) {
+                            finalText += '\n\n1️⃣ للتأكيد\n2️⃣ للاعتذار';
+                        }
+                        finalText = applySpintax(finalText); // Apply invisibility/variance matrix
+
+                        let res;
+                        const typingDelay = Math.floor(Math.random() * 3000) + (mode === 'fast' ? 1000 : 2500); 
+                        
+                        if (msg.image_url) {
+                            console.log(`[Batch] 📷 Sending Media to ${number} (${guestName})...`);
+                            res = await callEvolutionWithInstance(`/message/sendMedia`, account.evolutionInstanceName, 'POST', {
+                                number: jid, options: { delay: typingDelay, presence: "composing" }, mediatype: "image", caption: finalText, media: msg.image_url, fileName: 'invitation.png'
+                            });
+                        } else {
+                            console.log(`[Batch] 📝 Sending Text to ${number} (${guestName})...`);
+                            res = await callEvolutionWithInstance(`/message/sendText`, account.evolutionInstanceName, 'POST', {
+                                number: jid, options: { delay: typingDelay, presence: "composing" }, text: finalText
+                            });
+                        }
+
+                        if (res?.key?.id || res?.key) {
+                            const evoMsgId = res.key?.id || (typeof res.key === 'string' ? res.key : null);
+                            console.log(`✅ [Batch] Sent to ${number}. ID: ${evoMsgId}`);
+                            jobState.stats.sent++;
+                            jobState.stats.pending--;
+                            jobState.lastLog = `Sent: ${guestName}`;
+                            await supabase.from('whatsapp_messages').update({
+                                status: 'sent', delivery_status: 'sent', sent_at: new Date().toISOString(), sender_account: account.phone, evolution_message_id: evoMsgId
+                            }).eq('id', msg.id);
+                        } else {
+                            // [DISCONNECTION PROTECTION]
+                            console.error('Batch Item Error:', res);
+                            jobState.isPaused = true; // Auto-pause the entire campaign!
+                            jobState.lastLog = `Disconnected! Queue Paused. Error: ${res?.error || 'Unknown'}`;
+                            throw new Error('Connection Drop: ' + (res?.error || 'Instance disconnected'));
+                        }
+
+                        // Dynamic Delay between normal sends
+                        const extraDelay = Math.floor(Math.random() * 5000); 
+                        await delay(waitTime + extraDelay);
+
+                        // If queue is empty, job is done
+                        if (jobState.stats.pending <= 0) {
+                            jobState.isRunning = false;
+                            jobState.lastLog = 'Done.';
+                        }
+
+                    } catch (e) {
+                        console.error(`Failed Queue Item:`, e.message);
+                        if (jobState.isPaused) {
+                            console.log(`[Batch] ⏸️ Paused to save ${guestName} from falling into failed status.`);
+                        } else {
+                            jobState.stats.failed++;
+                            jobState.stats.pending--;
+                            jobState.lastLog = `Error: ${e.message}`;
+                            await supabase.from('whatsapp_messages').update({ status: 'failed', error_message: e.message }).eq('id', msg.id);
+                        }
                     }
-
-                    if (!isNumberValid) {
-                        console.log(`[Batch] ❌ Invalid WhatsApp Number: ${number}. Skipping.`);
-                        jobState.stats.failed++;
-                        jobState.lastLog = `Invalid Number: ${guestName}`;
-
-                        // Mark as invalid_number
-                        await supabase.from('whatsapp_messages').update({
-                            status: 'failed',
-                            delivery_status: 'invalid_number',
-                            error_log: 'Number not registered on WhatsApp',
-                            sent_at: new Date().toISOString()
-                        }).eq('id', msg.id);
-
-                        continue; // Skip sending
-                    }
-                    // --- [End Verification] ---
-
-                    // Build the message text - append 1/2 instructions if not already present
-                    let finalText = msg.message_text || '';
-                    if (useButtons && !finalText.includes('1') && !finalText.includes('تأكيد')) {
-                        finalText += '\n\n1️⃣ للتأكيد\n2️⃣ للاعتذار';
-                    }
-
-                    let res;
-                    if (msg.image_url) {
-                        console.log(`[Batch] 📷 Sending Media to ${number} (${guestName})...`);
-                        res = await callEvolutionWithInstance(`/message/sendMedia`, account.evolutionInstanceName, 'POST', {
-                            number: jid,
-                            options: { delay: 1200, presence: "composing" },
-                            mediatype: "image",
-                            caption: finalText,
-                            media: msg.image_url,
-                            fileName: 'invitation.png'
-                        });
-                    } else {
-                        console.log(`[Batch] 📝 Sending Text to ${number} (${guestName})...`);
-                        res = await callEvolutionWithInstance(`/message/sendText`, account.evolutionInstanceName, 'POST', {
-                            number: jid,
-                            options: { delay: 1200, presence: "composing" },
-                            text: finalText
-                        });
-                    }
-
-                    if (res?.key?.id || res?.key) {
-                        const evoMsgId = res.key?.id || (typeof res.key === 'string' ? res.key : null);
-                        console.log(`✅ [Batch Success] Sent to ${number}. ID: ${evoMsgId}`);
-                        jobState.stats.sent++;
-                        jobState.lastLog = `Sent: ${guestName}`;
-                        // Update DB with evolution_message_id for delivery tracking
-                        await supabase.from('whatsapp_messages').update({
-                            status: 'sent',
-                            delivery_status: 'sent',
-                            sent_at: new Date().toISOString(),
-                            sender_account: account.phone,
-                            evolution_message_id: evoMsgId
-                        }).eq('id', msg.id);
-                    } else {
-                        console.error('Batch Item Error:', res);
-                        throw new Error(res?.error || 'Instance disconnected or generic fail');
-                    }
-
-                } catch (e) {
-                    console.error(`Failed:`, e.message);
-                    jobState.stats.failed++;
-                    jobState.lastLog = `Error: ${e.message}`;
-                    await supabase.from('whatsapp_messages').update({
-                        status: 'failed',
-                        error_message: e.message
-                    }).eq('id', msg.id);
                 }
+            });
+        }
 
-                jobState.stats.pending--;
-                await delay(waitTime);
-            }
-            jobState.isRunning = false;
-            jobState.lastLog = jobState.shouldStop ? 'Stopped.' : 'Done.';
-        })();
-
-        res.json({ success: true, message: 'Batch started' });
+        res.json({ success: true, message: `Queued ${messages.length} messages` });
     } catch (error) {
         console.error('Batch Sending Error:', error);
         res.status(500).json({ success: false, error: error.message });
@@ -1961,6 +2098,12 @@ app.get(['/api/whatsapp/status', '/api/whatsapp/status/:eventId'], (req, res) =>
 app.post('/api/whatsapp/prepare-messages', async (req, res) => {
     try {
         const { eventId, template, customMessage, messagePhase = 'invite', globalImageUrl = null, filters } = req.body;
+        
+        if (preparingLocks.has(eventId)) {
+            return res.status(400).json({ success: false, error: 'رجاء الانتظار، جاري تحضير الرسائل لنفس المناسبة...' });
+        }
+        preparingLocks.add(eventId);
+
         // Support both direct targetAudience param and nested filters object from frontend
         let targetAudience = req.body.targetAudience || 'all';
         if (filters?.rsvp_status && filters.rsvp_status !== 'all') {
@@ -1974,7 +2117,10 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
             .eq('id', eventId)
             .single();
 
-        if (eventError) throw eventError;
+        if (eventError) {
+            preparingLocks.delete(eventId);
+            throw eventError;
+        }
 
         const ws = event.settings?.whatsapp_settings || {};
         const isDirectSend = ws.enable_direct_send === true;
@@ -1982,7 +2128,7 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
         // 2. Build guest query
         let query = supabase
             .from('guests')
-            .select('id, name, phone, card_image_url, custom_data, rsvp_status')
+            .select('id, name, phone, card_image_url, custom_data, rsvp_status, category, whatsapp_messages(id)')
             .eq('event_id', eventId);
 
         // Filters
@@ -1992,13 +2138,20 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
             query = query.is('rsvp_status', null);
         } else if (targetAudience === 'declined') {
             query = query.eq('rsvp_status', 'declined');
+        } else if (targetAudience === 'replacements') {
+            query = query.eq('category', 'replacement');
+        } else if (targetAudience === 'specific' && req.body.guestIds) {
+            query = query.in('id', req.body.guestIds);
         }
         if (messagePhase === 'qr_code') {
             query = query.eq('rsvp_status', 'confirmed');
         }
 
         const { data: guests, error: guestsError } = await query;
-        if (guestsError) throw guestsError;
+        if (guestsError) {
+            preparingLocks.delete(eventId);
+            throw guestsError;
+        }
 
         // 3. Clear existing pending for this event/phase to avoid duplicates
         await supabase
@@ -2014,7 +2167,12 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
                 const name = (g.name || '').toLowerCase();
                 const phone = (g.phone || '');
                 const isSample = name.includes('عينة') || name.includes('sample') || phone.includes('000000');
-                return g.phone && !isSample;
+                if (!g.phone || isSample) return false;
+                
+                // For 'unsent', skip if they already have whatsapp_messages
+                if (targetAudience === 'unsent' && g.whatsapp_messages && g.whatsapp_messages.length > 0) return false;
+                
+                return true;
             })
             .map(guest => {
                 const variables = getTemplateVariables(guest, event);
@@ -2054,6 +2212,8 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
     } catch (error) {
         console.error('Prepare Error:', error);
         res.status(500).json({ success: false, error: error.message });
+    } finally {
+        preparingLocks.delete(req.body.eventId);
     }
 });
 

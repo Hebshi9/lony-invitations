@@ -102,10 +102,17 @@ export default function WhatsAppSender() {
     const [useButtons, setUseButtons] = useState(true);
     const [aiGenerating, setAiGenerating] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [isPreparing, setIsPreparing] = useState(false); // Locking logic
+
+    // Campaign Configuration
+    const [chunkSize, setChunkSize] = useState<number>(20);
+    const [restDelayMinutes, setRestDelayMinutes] = useState<number>(5);
+    const [targetAudience, setTargetAudience] = useState<'all' | 'unsent' | 'replacements' | 'specific'>('all');
+    const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
 
     // Queue Status
     const [queueStatus, setQueueStatus] = useState<any>({
-        isRunning: false, isPaused: false, progress: 0, total: 0
+        isRunning: false, isPaused: false, isResting: false, nextBatchAt: null, progress: 0, total: 0
     });
     const [logs, setLogs] = useState<string[]>([]);
 
@@ -118,6 +125,9 @@ export default function WhatsAppSender() {
     const [demoPhones, setDemoPhones] = useState('');
     const [demoImageUrl, setDemoImageUrl] = useState('');
     const [demoSending, setDemoSending] = useState(false);
+
+    // Guest Filters
+    const [guestFilter, setGuestFilter] = useState<'all' | 'failed' | 'pending' | 'delivered'>('all');
 
     // Refs
     const logContainerRef = useRef<HTMLDivElement>(null);
@@ -245,6 +255,21 @@ export default function WhatsAppSender() {
         }
     };
 
+    const handleEditPhone = async (guest: any, newPhone: string) => {
+        try {
+            const { error } = await supabase
+                .from('guests')
+                .update({ phone: newPhone || null })
+                .eq('id', guest.id);
+
+            if (error) throw error;
+            setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, phone: newPhone || null } : g));
+            addLog(`✅ تم تعديل رقم الضيف ${guest.name} بنجاح`);
+        } catch (e: any) {
+            alert('فشل في تعديل الرقم: ' + e.message);
+        }
+    };
+
     // === ACTIONS ===
     const handleGenerateAI = async () => {
         if (!selectedEventId) return alert("اختر مناسبة أولاً");
@@ -282,7 +307,9 @@ export default function WhatsAppSender() {
     const handleStartQueue = async () => {
         if (!selectedEventId) return alert('الرجاء اختيار المناسبة');
         if (!messageTemplate.trim()) return alert('الرسالة فارغة');
+        if (isPreparing) return alert('جاري تحضير الرسائل... الرجاء الانتظار');
 
+        setIsPreparing(true);
         addLog('⏳ Preparing campaign...');
         try {
             // 1. Prepare
@@ -293,16 +320,24 @@ export default function WhatsAppSender() {
                     eventId: selectedEventId,
                     template: messageTemplate,
                     messagePhase: campaignType, // sent as 'invite' or 'qr_code'
+                    targetAudience: targetAudience, // New smart targeting
+                    guestIds: selectedGuestIds, // For precise targeting
                     filters: { rsvp_status: campaignType === 'qr_code' ? 'confirmed' : 'all' },
-                    globalImageUrl: globalImageUrl || null // New: Pass global image override
+                    globalImageUrl: globalImageUrl || null // Pass global image override
                 })
             });
             const prep = await prepRes.json();
-            if (!prep.success) throw new Error(prep.error);
+            if (!prep.success) throw new Error(prep.error || 'Unknown error');
 
-            if (prep.count === 0) return alert('لا يوجد ضيوف مستهدفين بهذه الحملة.');
+            if (prep.count === 0) {
+                setIsPreparing(false);
+                return alert('لا يوجد ضيوف مستهدفين بهذه الحملة ضمن الفلتر المختار.');
+            }
 
-            if (!confirm(`سيتم إرسال ${prep.count} رسالة (${campaignType === 'qr_code' ? 'كروت باركود' : 'دعوات عامة'}).\nالسرعة: ${sendingSpeed}`)) return;
+            if (!confirm(`سيتم إرسال ${prep.count} رسالة (${campaignType === 'qr_code' ? 'كروت باركود' : 'دعوات عامة'}).\nسرعة الإرسال المختارة: وتيرة معتمدة.`)) {
+                setIsPreparing(false);
+                return;
+            }
 
             // 2. Start
             const startRes = await fetch(`${API_URL}/send-batch`, {
@@ -313,7 +348,11 @@ export default function WhatsAppSender() {
                     mode: sendingSpeed, // 'fast', 'balanced', 'safe'
                     useButtons: useButtons,
                     accountId: selectedAccountId,
-                    autoFollowup: autoFollowup // New: Control whether webhook auto-responds
+                    autoFollowup: autoFollowup, // Control whether webhook auto-responds
+                    chunkSize: chunkSize,
+                    restDelayMinutes: restDelayMinutes,
+                    target: targetAudience,
+                    guestIds: selectedGuestIds
                 })
             });
 
@@ -324,6 +363,8 @@ export default function WhatsAppSender() {
 
         } catch (e: any) {
             alert(e.message);
+        } finally {
+            setIsPreparing(false);
         }
     };
 
@@ -367,10 +408,12 @@ export default function WhatsAppSender() {
                 if (data.success && data.status) {
                     setQueueStatus((prev: any) => ({
                         ...prev,
-                        isRunning: data.status.isRunning,
+                        isRunning: data.status.isRunning || data.status.isResting,
                         isPaused: data.status.isPaused,
-                        processed: (data.status.stats?.sent || 0) + (data.status.stats?.failed || 0),
-                        total: (data.status.stats?.pending || 0) + (data.status.stats?.queued || 0) + (data.status.stats?.sent || 0) + (data.status.stats?.failed || 0)
+                        isResting: data.status.isResting,
+                        nextBatchAt: data.status.nextBatchAt,
+                        processed: (data.status.sent || 0) + (data.status.failed || 0),
+                        total: (data.status.sent || 0) + (data.status.failed || 0) + (data.status.queued || 0)
                     }));
 
                     if (data.status.lastLog) {
@@ -706,6 +749,39 @@ export default function WhatsAppSender() {
                         )}
                     </div>
 
+                    {/* Chunking Config Section */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 block">⚙️ إعدادات الإرسال الآمن (Chunks)</label>
+                        <div className="flex gap-2">
+                            <div className="flex-1">
+                                <label className="text-[9px] font-bold text-slate-400 mb-1 block">دعوة لكل دفعة</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="100"
+                                    value={chunkSize}
+                                    onChange={(e) => setChunkSize(Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <label className="text-[9px] font-bold text-slate-400 mb-1 block">استراحة (دقائق)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="60"
+                                    value={restDelayMinutes}
+                                    onChange={(e) => setRestDelayMinutes(Number(e.target.value))}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                            </div>
+                        </div>
+                        <p className="text-[8px] text-emerald-600 mt-2 font-bold flex flex-wrap gap-1">
+                            <CheckCircle className="w-2.5 h-2.5" />
+                            يتم إيقاف الإرسال العام لراحتك، ولا يتضرر كرت الدخول للمؤكدين.
+                        </p>
+                    </div>
+
                     {/* Automation Section */}
                     <div className="space-y-3">
                         <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">أتمتة الاستجابة</label>
@@ -897,34 +973,67 @@ export default function WhatsAppSender() {
                                     </div>
                                 )}
 
-                                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                                    {/* Two Column Layout: Table vs Editor */}
-                                    <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[600px] xl:h-[calc(100vh-350px)] min-h-[500px]">
-                                        <div className="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0">
+                                <div className="grid grid-cols-1 gap-6">
+                                    {/* Smart Editor (Moved to top for full width view) */}
+                                    {/* Bottom: Table (Full Width) */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col min-h-[800px]">
+                                        <div className="p-4 border-b bg-gray-50 flex flex-col sm:flex-row gap-4 justify-between items-center shrink-0">
                                             <h3 className="font-bold text-gray-700 text-sm flex items-center gap-2">
                                                 <User className="w-4 h-4 text-gray-400" />
-                                                قائمة الضيوف
+                                                قائمة بيانات الضيوف الشاملة
                                             </h3>
-                                            <div className="flex gap-2 text-[10px] text-gray-500 bg-white px-3 py-1.5 rounded-full border shadow-sm">
-                                                <span className="font-bold text-gray-700">العدد: {guests.length}</span>
-                                                <span className="text-gray-300">|</span>
+                                            
+                                            {/* Filters */}
+                                            <div className="flex bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
+                                                <button 
+                                                    onClick={() => setGuestFilter('all')} 
+                                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${guestFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                                                >
+                                                    الكل ({guests.length})
+                                                </button>
+                                                <button 
+                                                    onClick={() => setGuestFilter('delivered')} 
+                                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${guestFilter === 'delivered' ? 'bg-green-50 text-green-700' : 'text-gray-500 hover:text-gray-700'}`}
+                                                >
+                                                    وصلت {(deliveryStats?.delivered || 0) + (deliveryStats?.read || 0)}
+                                                </button>
+                                                <button 
+                                                    onClick={() => setGuestFilter('failed')} 
+                                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${guestFilter === 'failed' ? 'bg-red-50 text-red-700' : 'text-gray-500 hover:text-gray-700'}`}
+                                                >
+                                                    فشلت {deliveryStats?.failed || 0}
+                                                </button>
+                                                <button 
+                                                    onClick={() => setGuestFilter('pending')} 
+                                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${guestFilter === 'pending' ? 'bg-amber-50 text-amber-700' : 'text-gray-500 hover:text-gray-700'}`}
+                                                >
+                                                    بانتظار الإرسال
+                                                </button>
+                                            </div>
+
+                                            <div className="hidden lg:flex gap-2 text-[10px] text-gray-500 bg-white px-3 py-1.5 rounded-full border shadow-sm">
                                                 <span className="text-green-600 font-bold">المؤكدين: {rsvpStats.confirmed}</span>
                                             </div>
                                         </div>
-                                        <div className="flex-1 overflow-hidden relative">
-                                            <div className="absolute inset-0">
-                                                <GuestTable
-                                                    guests={guests}
-                                                    onRetry={handleDirectSend}
-                                                    onDirectSend={handleDirectSend}
-                                                    onOverrideStatus={handleOverrideStatus}
-                                                />
-                                            </div>
+                                        <div className="p-4 flex-1 overflow-auto rounded-b-2xl">
+                                            <GuestTable
+                                                guests={guests.filter(g => {
+                                                    const s = g.last_message_status;
+                                                    if (guestFilter === 'failed') return s === 'failed';
+                                                    if (guestFilter === 'delivered') return s === 'delivered' || s === 'read';
+                                                    if (guestFilter === 'pending') return !s || s === 'pending' || s === 'queued';
+                                                    return true; // all
+                                                })}
+                                                onRetry={handleDirectSend}
+                                                onDirectSend={handleDirectSend}
+                                                onOverrideStatus={handleOverrideStatus}
+                                                onEditPhone={handleEditPhone}
+                                            />
                                         </div>
                                     </div>
 
-                                    {/* Right: Smart Editor (Sticky on large screens) */}
-                                    <div className="xl:col-span-5 flex flex-col gap-4">
+                                    {/* Right: Smart Editor */}
+                                    <div className="w-full flex flex-col gap-4">
                                         {!selectedEventId ? (
                                             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col items-center justify-center text-gray-400 p-8 text-center h-[400px]">
                                                 <Bot className="w-16 h-16 mb-4 opacity-10" />
@@ -960,7 +1069,8 @@ export default function WhatsAppSender() {
                                                             <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block tracking-wider">متغيرات ذكية</label>
                                                             <div className="flex flex-wrap gap-2">
                                                                 <TemplateVariable label="اسم الضيف" value="{{name}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
-                                                                <TemplateVariable label="الموقع" value="{{location}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                                <TemplateVariable label="العدد المسموح" value="{{companions_count}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
+                                                                <TemplateVariable label="اسم القاعة" value="{{venue}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
                                                                 <TemplateVariable label="رابط الباركود" value="{{qr_link}}" onClick={(v: string) => setMessageTemplate(p => p + v)} />
                                                             </div>
                                                         </div>
@@ -983,6 +1093,21 @@ export default function WhatsAppSender() {
                                                     {/* Sending Settings */}
                                                     <div className="p-4 bg-gray-50 border-t border-gray-100 space-y-4">
                                                         <div className="flex justify-between items-center">
+                                                            <label className="text-xs font-bold text-gray-600">استهداف الضيوف</label>
+                                                            <select
+                                                                value={targetAudience}
+                                                                onChange={e => setTargetAudience(e.target.value as any)}
+                                                                className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-indigo-700 font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                            >
+                                                                <option value="all">كل الضيوف</option>
+                                                                <option value="unsent">جدد (لم يرسل لهم)</option>
+                                                                <option value="replacements">البدلاء فقط</option>
+                                                                <option value="confirmed">المؤكدين</option>
+                                                                <option value="declined">المعتذرين</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div className="flex justify-between items-center py-2 border-t border-gray-100/50">
                                                             <label className="text-xs font-bold text-gray-600">سرعة الإرسال</label>
                                                             <SpeedControl speed={sendingSpeed} setSpeed={setSendingSpeed} />
                                                         </div>
@@ -1004,20 +1129,41 @@ export default function WhatsAppSender() {
                                                         {!queueStatus.isRunning ? (
                                                             <Button
                                                                 onClick={handleStartQueue}
-                                                                className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-95 text-sm font-bold flex justify-center items-center gap-2 rounded-xl"
+                                                                disabled={isPreparing}
+                                                                className={`w-full h-12 text-white shadow-lg transition-all active:scale-95 text-sm font-bold flex justify-center items-center gap-2 rounded-xl ${isPreparing ? 'bg-indigo-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-300 shadow-indigo-200'}`}
                                                             >
-                                                                <Send className="w-5 h-5" />
-                                                                إرسال الحملة الآن
+                                                                {isPreparing ? (
+                                                                    <>
+                                                                       <Loader2 className="w-5 h-5 animate-spin" />
+                                                                       جاري تحضير الرسائل...
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                       <Send className="w-5 h-5" />
+                                                                       إرسال الحملة الآن
+                                                                    </>
+                                                                )}
                                                             </Button>
                                                         ) : (
                                                             <div className="space-y-3">
                                                                 <div className="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm">
                                                                     <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2">
-                                                                        <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> جاري الإرسال...</span>
+                                                                        <span className="flex items-center gap-1">
+                                                                            {queueStatus.isResting ? (
+                                                                                <span className="flex items-center gap-2 text-amber-600">
+                                                                                    <Clock className="w-3 h-3 animate-pulse" />
+                                                                                    استراحة للراحة (☕) ... يبدأ خلال: {Math.round((new Date(queueStatus.nextBatchAt).getTime() - Date.now()) / 1000)} ثانية
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="flex items-center gap-2">
+                                                                                    <Loader2 className="w-3 h-3 animate-spin" /> جاري الإرسال (محاكاة بشرية)...
+                                                                                </span>
+                                                                            )}
+                                                                        </span>
                                                                         <span>{queueStatus.processed} / {queueStatus.total}</span>
                                                                     </div>
                                                                     <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                                                                        <div className="h-full bg-indigo-500 transition-all duration-300 rounded-full" style={{ width: `${(queueStatus.processed / (queueStatus.total || 1)) * 100}%` }}></div>
+                                                                        <div className={`h-full transition-all duration-300 rounded-full ${queueStatus.isResting ? 'bg-amber-400' : 'bg-indigo-500'}`} style={{ width: `${(queueStatus.processed / (queueStatus.total || 1)) * 100}%` }}></div>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex gap-2">

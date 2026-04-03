@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-    CheckCircle, XCircle, Clock, Send, RefreshCcw
+    CheckCircle, XCircle, Clock, Send, RefreshCcw, Edit2, Save, X
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -9,9 +9,13 @@ interface GuestTableProps {
     onRetry: (guest: any) => void;
     onDirectSend: (guest: any) => void;
     onOverrideStatus?: (guest: any, newStatus: string) => void;
+    onEditPhone?: (guest: any, newPhone: string) => void;
 }
 
-const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus }) => {
+const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus, onEditPhone }) => {
+
+    const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null);
+    const [editPhoneValue, setEditPhoneValue] = useState('');
 
     // Helper to get status icon and color
     const getStatusInfo = (status: string) => {
@@ -44,6 +48,8 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                         <th className="p-3 font-medium text-gray-600">#</th>
                         <th className="p-3 font-medium text-gray-600">الضيف</th>
                         <th className="p-3 font-medium text-gray-600">الجوال</th>
+                        <th className="p-3 font-medium text-gray-600">الفئة/الطاولة</th>
+                        <th className="p-3 font-medium text-gray-600">المرافقين</th>
                         <th className="p-3 font-medium text-gray-600">حالة الإرسال</th>
                         <th className="p-3 font-medium text-gray-600">حالة الرد (RSVP)</th>
                         <th className="p-3 font-medium text-gray-600">إجراءات</th>
@@ -69,9 +75,52 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                                 <tr key={guest.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="p-3 text-gray-500">{index + 1}</td>
                                     <td className="p-3 font-medium text-gray-900">{guest.name}</td>
-                                    <td className="p-3 text-gray-600 font-mono text-xs" dir="ltr">{guest.phone}</td>
+                                    <td className="p-3" dir="ltr">
+                                        {editingPhoneId === guest.id ? (
+                                            <div className="flex items-center gap-1 justify-end">
+                                                <button onClick={() => {
+                                                    if(onEditPhone) onEditPhone(guest, editPhoneValue);
+                                                    setEditingPhoneId(null);
+                                                }} className="text-green-600 hover:bg-green-50 p-1 rounded">
+                                                    <Save className="w-3 h-3" />
+                                                </button>
+                                                <button onClick={() => setEditingPhoneId(null)} className="text-red-500 hover:bg-red-50 p-1 rounded">
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                                <input 
+                                                    type="text" 
+                                                    value={editPhoneValue} 
+                                                    onChange={(e) => setEditPhoneValue(e.target.value)}
+                                                    className="w-24 text-xs p-1 border rounded focus:ring-1 focus:ring-indigo-500 outline-none text-left font-mono"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-end gap-2 group">
+                                                {onEditPhone && (
+                                                    <button 
+                                                        onClick={() => { setEditingPhoneId(guest.id); setEditPhoneValue(guest.phone || ''); }}
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-indigo-600 p-1"
+                                                        title="تعديل الرقم"
+                                                    >
+                                                        <Edit2 className="w-3 h-3" />
+                                                    </button>
+                                                )}
+                                                <span className={`text-xs font-mono ${!guest.phone ? 'text-red-400 italic' : 'text-gray-600'}`}>
+                                                    {guest.phone || 'بدون رقم'}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="p-3 whitespace-nowrap">
+                                        {guest.table_no ? <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs ml-1 font-mono">طاولة: {guest.table_no}</span> : ''}
+                                        {guest.category && guest.category !== 'عادي' ? <span className="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-bold">{guest.category}</span> : ''}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                        <span className="font-bold text-gray-700">{guest.companions_count || 0}</span>
+                                    </td>
                                     <td className="p-3">
-                                        <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${statusInfo.color} ${statusInfo.bg}`}>
+                                        <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${statusInfo.color} ${statusInfo.bg}`}>
                                             {statusInfo.icon}
                                             {statusInfo.label}
                                         </div>

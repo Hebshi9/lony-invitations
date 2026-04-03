@@ -38,7 +38,10 @@ app.use(express.json());
 // Request logger
 app.use((req, res, next) => {
     console.log(`[DEBUG_REQ] >>> ${new Date().toISOString()} | ${req.method} ${req.url}`);
-    if (req.method === 'POST') console.log(`[DEBUG_BODY]`, JSON.stringify(req.body).substring(0, 500));
+    if (req.method === 'POST') {
+        const bodyStr = req.body ? JSON.stringify(req.body) : '';
+        console.log(`[DEBUG_BODY]`, bodyStr.substring(0, 500));
+    }
     next();
 });
 

@@ -228,10 +228,18 @@ async function discoverActiveInstance() {
         const instancesList = instancesResp.data || (Array.isArray(instancesResp) ? instancesResp : []);
 
         // Find the specific instance by name pattern
-        const targetInstance = instancesList.find(inst => {
+        let targetInstance = instancesList.find(inst => {
             const name = (inst.instanceName || inst.name || inst.id || inst.instanceId || '').toLowerCase();
             return name === targetInstanceName.toLowerCase();
         });
+
+        // FALLBACK: If the exact target is not found (because user added random accounts from UI), pick the first OPEN instance
+        if (!targetInstance) {
+            targetInstance = instancesList.find(inst => {
+                const status = inst.connectionStatus || inst.state || inst.status || '';
+                return status === 'open' || status === 'connected';
+            });
+        }
 
         if (targetInstance) {
             const status = targetInstance.connectionStatus || targetInstance.state || targetInstance.status || '';
@@ -248,7 +256,7 @@ async function discoverActiveInstance() {
             }
         }
 
-        console.log(`❌ Target instance "${targetInstanceName}" not found in Evolution Manager. Please create an instance named "${targetInstanceName}".`);
+        console.log(`❌ Target instance "${targetInstanceName}" not found in Evolution Manager, and no other connected instances exist.`);
         return null;
 
     } catch (e) {

@@ -337,8 +337,8 @@ async function callEvolutionWithInstance(endpointPrefix, instanceCandidate, meth
         }
 
         if (isInstanceError(result)) {
-            console.error('❌ All instance attempts failed. Last error:', result.status, result.error || result.message);
-            return { status: 500, error: 'No working instances available. Check Evolution API Manager.' };
+            console.error('❌ All instance attempts failed. Last error:', result.status, result.message || result.error);
+            return result; // RETURN the actual JSON containing the message instead of generic 500 error!
         }
     }
     return result;
@@ -1733,7 +1733,8 @@ app.post('/api/whatsapp/send-individual', async (req, res) => {
 
             res.json({ success: true, message: 'Sent successfully' });
         } else {
-            throw new Error(result?.error || 'Evolution Error');
+            const errorReason = result?.response?.error?.[0] || result?.message || result?.error || 'Evolution Error';
+            throw new Error(`Evolution API Error: ${errorReason}`);
         }
 
     } catch (error) {

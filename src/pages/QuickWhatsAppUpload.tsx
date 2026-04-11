@@ -208,33 +208,10 @@ export default function QuickWhatsAppUpload() {
                 .insert(guestsToInsert);
 
             if (guestsError) throw guestsError;
-            setProgress(70);
-
-            // 4. Prepare WhatsApp Messages
-            const { data: createdGuests } = await supabase
-                .from('guests')
-                .select('*')
-                .eq('event_id', event.id);
-
-            const messages = (createdGuests || []).map(guest => ({
-                event_id: event.id,
-                guest_id: guest.id,
-                phone: guest.phone,
-                message_text: `مرحباً ${guest.name}،\n\nيسعدنا دعوتك لحضور ${eventName}\n\nالتاريخ: ${eventDate}\n\nنتشرف بحضوركم 🎉`,
-                image_url: guest.card_image_url,
-                message_phase: 'personalized',
-                status: 'pending'
-            }));
-
-            const { error: messagesError } = await supabase
-                .from('whatsapp_messages')
-                .insert(messages);
-
-            if (messagesError) throw messagesError;
             setProgress(100);
 
-            alert(`✅ تم! تم إنشاء الحدث وتجهيز ${messages.length} رسالة.\n\nانتقل إلى صفحة WhatsApp Sender لبدء الإرسال.`);
-            window.location.href = '/whatsapp-sender';
+            alert(`✅ تم! تم إنشاء الحدث بنجاح وتجهيز الضيوف والكروت.\n\nانتقل الآن إلى صفحة الإطلاق الرسمية (Meta) لبدء الإرسال.`);
+            window.location.href = `/whatsapp-sender?eventId=${event.id}`;
 
         } catch (error: any) {
             console.error('Error:', error);

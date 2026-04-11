@@ -12,9 +12,12 @@ interface EventManagerProps {
 }
 
 const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) => {
+
     const [name, setName] = useState('');
     const [date, setDate] = useState('');
     const [venue, setVenue] = useState('');
+    const [groomName, setGroomName] = useState('');
+    const [brideName, setBrideName] = useState('');
     const [activationTime, setActivationTime] = useState('');
     const [openingTime, setOpeningTime] = useState('13:00');
     const [country, setCountry] = useState('Saudi Arabia');
@@ -58,7 +61,10 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
         if (initialEvent) {
             setName(initialEvent.name || '');
             setDate(initialEvent.date || '');
+
             setVenue(initialEvent.venue || '');
+            setGroomName(initialEvent.groom_name || '');
+            setBrideName(initialEvent.bride_name || '');
             setCountry(initialEvent.country || 'Saudi Arabia');
             setHostPin(initialEvent.host_pin || '');
 
@@ -119,7 +125,10 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                 const { error: updateError } = await supabase
                     .from('events')
                     .update({
+
                         name, date, venue,
+                        groom_name: groomName,
+                        bride_name: brideName,
                         host_pin: features.enable_host_pin ? hostPin : null,
                         activation_time: activationTimestamp,
                         opening_time: openingTimestamp,
@@ -136,6 +145,8 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                     .from('events')
                     .insert({
                         name, date, venue, token,
+                        groom_name: groomName,
+                        bride_name: brideName,
                         host_pin: features.enable_host_pin ? hostPin : null,
                         activation_time: activationTimestamp,
                         opening_time: openingTimestamp,
@@ -224,6 +235,28 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                                         placeholder="مثال: حفل زفاف محمد وسارة"
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-600">اسم العريس</label>
+                                    <input
+                                        type="text"
+                                        className="w-full p-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 outline-none"
+                                        placeholder="مثال: محمد"
+                                        value={groomName}
+                                        onChange={(e) => setGroomName(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-gray-600">اسم العروس</label>
+                                    <input
+                                        type="text"
+                                        className="w-full p-3 bg-gray-50 border-gray-200 rounded-xl focus:ring-2 focus:ring-lony-gold/50 outline-none"
+                                        placeholder="مثال: سارة"
+                                        value={brideName}
+                                        onChange={(e) => setBrideName(e.target.value)}
                                     />
                                 </div>
                             </div>

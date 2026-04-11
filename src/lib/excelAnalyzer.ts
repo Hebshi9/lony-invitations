@@ -105,9 +105,9 @@ function detectColumnType(header: string, samples: string[]): {
                 /جوال|هاتف|phone|mobile|رقم|الجوال|tel|telephone/i
             ],
             dataValidation: (val: string) => {
-                // Saudi phone numbers: +966, 05, 00966, or plain 5xxxxxxxx
+                // Any phone number: digits with possible +
                 const cleaned = val.replace(/[\s\-()]/g, '');
-                return /^(\+?966|0?5)\d{8,9}$/.test(cleaned);
+                return /^\+?\d{8,20}$/.test(cleaned);
             },
             weight: 0.9
         },
@@ -229,25 +229,27 @@ export function validateGuestsData(guests: any[]): {
         const rowErrors: string[] = [];
 
         // Validate name (required)
-        if (!guest.name || guest.name.length < 2) {
+        if (!guest.name || guest.name.length < 1) {
             errors.push({
                 row: guest._rowIndex,
                 field: 'name',
-                message: 'الاسم مطلوب ويجب أن يكون أطول من حرفين'
+                message: 'الاسم مطلوب'
             });
             rowErrors.push('name');
         }
 
-        // Validate phone (optional, but must be valid if provided)
+        // Validate phone (optional, but keep it permissive for international numbers)
         if (guest.phone) {
             const cleaned = guest.phone.replace(/[\s\-()]/g, '');
-            if (!/^(\+?966|0?5)\d{8,9}$/.test(cleaned)) {
+            // Just check if it has at least 8 digits and starts with a plus or digit
+            if (!/^\+?\d{8,20}$/.test(cleaned)) {
                 errors.push({
                     row: guest._rowIndex,
                     field: 'phone',
-                    message: 'رقم الجوال غير صحيح'
+                    message: 'رقم الجوال يجب أن يحتوي على 8 أرقام على الأقل'
                 });
-                rowErrors.push('phone');
+                // We will nullify the invalid phone instead of dropping the guest entirely
+                guest.phone = null;
             }
         }
 

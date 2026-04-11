@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تحليلات المناسبة - لوني انفايت</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Kufi+Arabic:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #c49a6c;
+            --primary-light: #e0c29f;
+            --bg: #0a0a0c;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+            --success: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            font-family: 'Noto Kufi Arabic', sans-serif;
+            min-height: 100vh;
+            padding: 1.5rem;
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(196, 154, 108, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.05) 0%, transparent 50%);
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            animation: fadeInDown 0.8s ease;
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #fff 0%, #c49a6c 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        header p { color: var(--text-dim); font-size: 0.9rem; }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 1.5rem;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover { border-color: var(--primary); transform: translateY(-3px); }
+        .stat-value { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.2rem; }
+        .stat-label { font-size: 0.8rem; color: var(--text-dim); font-weight: 400; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.4rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 0.8rem;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .tab-btn.active {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 4px 12px rgba(196, 154, 108, 0.2);
+        }
+
+        /* Search Bar */
+        .search-area {
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 1rem;
+        }
+
+        .search-input {
+            flex: 1;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 0.8rem 1.2rem;
+            border-radius: 12px;
+            color: #fff;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus { border-color: var(--primary); }
+
+        /* Data Section */
+        .content-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .list-container {
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .guest-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.2rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+
+        .guest-item:last-child { border-bottom: none; }
+        .guest-item:hover { background: rgba(255, 255, 255, 0.02); }
+
+        .guest-main h3 { font-size: 1rem; margin-bottom: 0.2rem; }
+        .guest-main p { font-size: 0.75rem; color: var(--text-dim); }
+
+        .status-pill {
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .pill-confirmed { background: rgba(16, 185, 129, 0.1); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+        .pill-declined { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); }
+        .pill-pending { background: rgba(245, 158, 11, 0.1); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.2); }
+        .pill-attended { background: rgba(99, 102, 241, 0.1); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.2); }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg); display: flex; justify-content: center; align-items: center;
+            z-index: 1000;
+        }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top: 3px solid var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .hidden { display: none !important; }
+
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Mobile Adjustments */
+        @media (max-width: 600px) {
+            body { padding: 1rem; }
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .guest-item { flex-direction: column; align-items: flex-start; gap: 0.8rem; }
+            .status-pill { align-self: flex-end; }
+        }
+    </style>
+</head>
+<body>
+    <div id="loader" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1 id="event-title">إحصائيات المناسبة</h1>
+            <p id="event-subtitle">تحليلات مباشرة وحية للاستجابة والحضور</p>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div id="stat-total" class="stat-value">0</div>
+                <div class="stat-label">إجمالي المدعوين</div>
+            </div>
+            <div class="stat-card">
+                <div id="stat-confirmed" class="stat-value" style="color: var(--success)">0</div>
+                <div class="stat-label">أكدوا الحضور</div>
+            </div>
+            <div class="stat-card">
+                <div id="stat-attended" class="stat-value" style="color: #818cf8">0</div>
+                <div class="stat-label">تم تسجيل دخولهم</div>
+            </div>
+            <div class="stat-card">
+                <div id="stat-declined" class="stat-value" style="color: var(--danger)">0</div>
+                <div class="stat-label">اعتذروا</div>
+            </div>
+        </div>
+
+        <nav class="tabs">
+            <button class="tab-btn active" onclick="switchTab('all', this)">الكل</button>
+            <button class="tab-btn" onclick="switchTab('confirmed', this)">المؤكدين</button>
+            <button class="tab-btn" onclick="switchTab('attended', this)">الحاضرين (سكني)</button>
+            <button class="tab-btn" onclick="switchTab('declined', this)">المعتذرين</button>
+        </nav>
+
+        <div class="search-area">
+            <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم الضيف أو رقم الجوال..." oninput="handleSearch()">
+        </div>
+
+        <div class="content-card">
+            <div id="guest-list" class="list-container">
+                <!-- Data injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const EVENT_ID = urlParams.get('eid') || urlParams.get('id');
+
+        const SUPABASE_URL = 'https://gxunxhzjqclddoobxvpz.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzAzNDMsImV4cCI6MjA4MDEwNjM0M30.OoOj_c7cqbsO_lzFKSM6hhPAg2F_F5gpRwBgDh74TXg';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let allGuests = [];
+        let currentFilter = 'all';
+
+        async function init() {
+            if (!EVENT_ID) {
+                alert('عذراً، الرابط غير صحيح (معرف الحدث مفقود)');
+                document.getElementById('loader').classList.add('hidden');
+                return;
+            }
+            await fetchData();
+            // Refresh every 30 seconds
+            setInterval(fetchData, 30000);
+        }
+
+        async function fetchData() {
+            try {
+                // Event Info
+                const { data: event } = await supabaseClient.from('events').select('name').eq('id', EVENT_ID).single();
+                if (event) document.getElementById('event-title').innerText = event.name;
+
+                // Guests
+                const { data: guests, error } = await supabaseClient
+                    .from('guests')
+                    .select('name, phone, rsvp_status, status, updated_at, table_no, companions_count')
+                    .eq('event_id', EVENT_ID)
+                    .order('updated_at', { ascending: false });
+
+                if (error) throw error;
+                allGuests = guests;
+                
+                updateStats();
+                renderList();
+            } catch (err) {
+                console.error(err);
+            } finally {
+                document.getElementById('loader').classList.add('hidden');
+            }
+        }
+
+        function updateStats() {
+            const confirmed = allGuests.filter(g => g.rsvp_status === 'confirmed').length;
+            const attended = allGuests.filter(g => g.status === 'attended').length;
+            const declined = allGuests.filter(g => g.rsvp_status === 'declined').length;
+
+            document.getElementById('stat-total').innerText = allGuests.length;
+            document.getElementById('stat-confirmed').innerText = confirmed;
+            document.getElementById('stat-attended').innerText = attended;
+            document.getElementById('stat-declined').innerText = declined;
+        }
+
+        function switchTab(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderList();
+        }
+
+        function handleSearch() {
+            renderList();
+        }
+
+        function renderList() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const container = document.getElementById('guest-list');
+            
+            let filtered = allGuests.filter(g => {
+                const matchesSearch = (g.name || '').toLowerCase().includes(search) || (g.phone || '').includes(search);
+                const matchesTab = currentFilter === 'all' || 
+                                 (currentFilter === 'attended' && g.status === 'attended') ||
+                                 (currentFilter === g.rsvp_status);
+                return matchesSearch && matchesTab;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div style="padding: 3rem; text-align: center; color: var(--text-dim);">لا توجد نتائج مطابقة</div>`;
+                return;
+            }
+
+            container.innerHTML = filtered.map(g => `
+                <div class="guest-item">
+                    <div class="guest-main">
+                        <h3>${g.name || 'ضيف'}</h3>
+                        <p>${g.phone || 'بدون رقم'} • طاولة: ${g.table_no || '--'} • مرافقين: ${g.companions_count || 0}</p>
+                    </div>
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;">
+                        <span class="status-pill pill-${g.status === 'attended' ? 'attended' : (g.rsvp_status || 'pending')}">
+                            ${translateStatus(g.rsvp_status, g.status)}
+                        </span>
+                        <span style="font-size: 0.6rem; color: var(--text-dim);">${g.updated_at ? new Date(g.updated_at).toLocaleTimeString('ar-SA') : ''}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function translateStatus(rsvp, status) {
+            if (status === 'attended') return 'تم الدخول ✅';
+            if (rsvp === 'confirmed') return 'مؤكد 📩';
+            if (rsvp === 'declined') return 'معتذر ❌';
+            return 'بانتظار الرد ⏳';
+        }
+
+        init();
+    </script>
+</body>
+</html>

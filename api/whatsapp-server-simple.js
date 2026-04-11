@@ -17,7 +17,12 @@ const openai = new OpenAI({
 
 const VERSION = '1.0.6'; // Last updated: 2026-03-17 - Webhook format fix
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = 80; // Move to standard Port 80 for direct accessibility
+
+// Meta Cloud API Credentials (to be filled from env)
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
+const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
+const META_VERSION = 'v21.0';
 
 // Global Error Handlers to prevent crash
 process.on('uncaughtException', (err) => {
@@ -213,6 +218,36 @@ function applySpintax(text) {
 }
 
 /**
+ * Human emulation: Set 'composing' (typing) status for a duration
+ */
+async function setTypingStatus(instanceName, jid, durationMs = 5000) {
+    try {
+        await callEvolutionWithInstance(`/chat/presence`, instanceName, 'POST', {
+            number: jid,
+            presence: 'composing'
+        });
+        await delay(durationMs);
+        await callEvolutionWithInstance(`/chat/presence`, instanceName, 'POST', {
+            number: jid,
+            presence: 'paused'
+        });
+    } catch (e) {
+        console.warn(`[Typing] ⚠️ Failed for ${jid}: ${e.message}`);
+    }
+}
+
+// Campaign Preparation Helper
+async function prepareMetaVariables(guest, event) {
+    return {
+        guest_name: guest.name || 'ضيفنا العزيز',
+        groom_name: event.groom_name || 'العريس',
+        bride_name: event.bride_name || 'العروس',
+        event_date: event.event_date || 'يوم المناسبة',
+        event_location: event.event_location || 'قاعة الاحتفالات'
+    };
+}
+
+/**
  * Discover all instances from Evolution API and return the target connected one
  */
 async function discoverActiveInstance() {
@@ -344,16 +379,156 @@ async function callEvolutionWithInstance(endpointPrefix, instanceCandidate, meth
     return result;
 }
 
-// Helper to check if an Evolution API response indicates an instance error
-function isInstanceError(result) {
-    if (!result) return true;
-    if (result.status === 404 || result.status === 500 || result.status === 503) return true;
-    const msg = result.response?.message || result.message || result.error || '';
-    if (typeof msg === 'string') {
-        const errorPatterns = ['instance does not exist', 'Connection Closed', 'not found', 'ECONNREFUSED', 'No open instances'];
-        return errorPatterns.some(p => msg.toLowerCase().includes(p.toLowerCase()));
+
+// --- PROVIDER DISPATCHER (THE BRAIN) ---
+
+/**
+ * Generic Send Function: Routes to Evolution or Meta based on account configuration
+ */
+async function dispatchMessage(accountId, payload) {
+    // 1. Fetch account config to determine provider
+    const { data: account, error } = await supabase
+        .from('whatsapp_accounts')
+        .select('*')
+        .eq('id', accountId)
+        .single();
+
+    if (error || !account) {
+        console.error(`[Dispatcher] ❌ Account ${accountId} not found or inaccessible.`);
+        return { success: false, error: 'Account not found' };
     }
-    return false;
+
+    const provider = account.provider || 'evolution';
+    console.log(`[Dispatcher] 🚀 Routing message via ${provider.toUpperCase()} provider.`);
+
+    if (provider === 'meta') {
+        return sendMetaMessage(account, payload);
+    } else {
+        return sendEvolutionMessage(account, payload);
+    }
+}
+
+/**
+ * Provider 1: Meta Cloud API (Official)
+ */
+async function sendMetaMessage(account, payload) {
+    const { meta_phone_number_id, meta_access_token } = account;
+    
+    if (!meta_phone_number_id || !meta_access_token) {
+        return { success: false, error: 'Meta credentials missing' };
+    }
+
+    const url = `https://graph.facebook.com/v18.0/${meta_phone_number_id}/messages`;
+    
+    // Check if it's a template or free-form
+    let body = {
+        messaging_product: "whatsapp",
+        to: payload.number,
+    };
+
+    if (payload.templateName) {
+        // Template Message (Mandatory for first message)
+        body.type = "template";
+        body.template = {
+            name: payload.templateName,
+            language: { code: payload.languageCode || 'ar' },
+            components: []
+        };
+
+        // Add Header Image if provided
+        if (payload.imageUrl) {
+            body.template.components.push({
+                type: "header",
+                parameters: [{ type: "image", image: { link: payload.imageUrl } }]
+            });
+        }
+
+
+        // Add Body Variables (Named parameters preferred by Meta in 2026)
+        if (payload.variables) {
+            const bodyParams = [];
+            
+            // If it's an object with keys (named params), map them
+            if (typeof payload.variables === 'object' && !Array.isArray(payload.variables)) {
+                for (const [key, value] of Object.entries(payload.variables)) {
+                    bodyParams.push({ 
+                        type: "text", 
+                        parameter_name: key,
+                        text: value 
+                    });
+                }
+            } else if (Array.isArray(payload.variables)) {
+                // Positional fall-back
+                payload.variables.forEach((v, i) => {
+                    bodyParams.push({ type: "text", text: v });
+                });
+            }
+
+            if (bodyParams.length > 0) {
+                body.template.components.push({
+                    type: "body",
+                    parameters: bodyParams
+                });
+            }
+        }
+    } else if (payload.mediatype === 'image') {
+        // Media Message
+        body.type = "image";
+        body.image = { link: payload.media, caption: payload.caption };
+    } else {
+        // Text Message
+        body.type = "text";
+        body.text = { body: payload.text };
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${meta_access_token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+
+        const data = await response.json();
+        
+        if (data.messages && data.messages.length > 0) {
+            return { success: true, key: { id: data.messages[0].id } };
+        } else {
+            console.error('[Meta API] ❌ Error:', JSON.stringify(data));
+            return { success: false, error: data.error?.message || 'Meta API error' };
+        }
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * Provider 2: Evolution API (Unofficial)
+ */
+async function sendEvolutionMessage(account, payload) {
+    const instanceName = account.phone; // Assuming phone matches instance name in evolution
+    let result;
+
+    if (payload.mediatype === 'image') {
+        result = await callEvolutionWithInstance(`/message/sendMedia`, instanceName, 'POST', {
+            number: payload.number,
+            options: { delay: payload.delay || 1200, presence: "composing" },
+            mediatype: "image",
+            caption: payload.caption,
+            media: payload.media,
+            fileName: payload.fileName || 'image.png'
+        });
+    } else {
+        result = await callEvolutionWithInstance(`/message/sendText`, instanceName, 'POST', {
+            number: payload.number,
+            options: { delay: payload.delay || 1200, presence: "composing" },
+            text: payload.text
+        });
+    }
+    
+    return result;
 }
 
 // --- Routes ---
@@ -575,22 +750,22 @@ app.get('/api/whatsapp/accounts', async (req, res) => {
 });
 
 app.post('/api/whatsapp/accounts', async (req, res) => {
-    try {
-        const { phone, name, daily_limit } = req.body;
+    const { phone, name, provider, meta_access_token, meta_phone_number_id, meta_waba_id } = req.body;
 
-        // 1. Upsert into Supabase to get/generate a UUID
-        const { data: upsertData, error: upsertError } = await supabase
+    try {
+        const { data, error } = await supabase
             .from('whatsapp_accounts')
-            .upsert({
-                phone: phone,
-                name: name || phone,
-                daily_limit: daily_limit || 170,
-                status: 'disconnected'
-            }, { onConflict: 'phone' })
+            .insert([{ 
+                phone, 
+                name, 
+                provider: provider || 'evolution',
+                meta_access_token,
+                meta_phone_number_id,
+                meta_waba_id,
+                status: provider === 'meta' ? 'connected' : 'disconnected'
+            }])
             .select()
             .single();
-
-        if (upsertError) throw upsertError;
 
         const accountId = upsertData.id;
 
@@ -1440,7 +1615,10 @@ app.post('/webhook', async (req, res) => {
                             execute: async () => {
                                 const sendRes = await callEvolutionWithInstance(`/message/sendMedia`, accountId, 'POST', {
                                     number: phone,
-                                    options: { delay: 3000, presence: "composing" },
+                                    options: { 
+                                        delay: Math.floor(Math.random() * 5000) + 3000, // 3-8s human simulation
+                                        presence: "composing" 
+                                    },
                                     mediatype: "image",
                                     caption: reply,
                                     media: guest.card_image_url,
@@ -1583,39 +1761,22 @@ ${imageUrl ? 'مهم جداً: لقد أرفقت لك صورة الدعوة. ي�
     }
 });
 
+
 // Sending
 app.post('/api/whatsapp/send', async (req, res) => {
     const { accountId, phone, message, imageUrl } = req.body;
 
     try {
-        const number = normalizePhone(phone);
-        const jid = number; // Evolution V2 prefers plain numbers
+        const payload = imageUrl 
+            ? { number: phone, mediatype: 'image', media: imageUrl, caption: message }
+            : { number: phone, text: message };
 
-        let result;
-        if (imageUrl) {
-            console.log(`[Send] Sending Media to ${number} via Proxy...`);
-            result = await callEvolutionWithInstance(`/message/sendMedia`, accountId, 'POST', {
-                number: jid,
-                options: { delay: 1200, presence: "composing" },
-                mediatype: "image",
-                caption: message,
-                media: imageUrl,
-                fileName: 'image.png'
-            });
-        } else {
-            console.log(`[Send] Sending Text to ${number} via Proxy...`);
-            result = await callEvolutionWithInstance(`/message/sendText`, accountId, 'POST', {
-                number: jid,
-                options: { delay: 1200, presence: "composing" },
-                text: message
-            });
-        }
+        const result = await dispatchMessage(accountId, payload);
 
-        if (result?.key?.id) {
-            console.log(`[${accountId}] Sent to ${number}`);
+        if (result?.success || result?.key?.id) {
             res.json({ success: true, message: 'Sent' });
         } else {
-            throw new Error(JSON.stringify(result));
+            throw new Error(result.error || 'Failed to send');
         }
 
     } catch (error) {
@@ -1671,7 +1832,7 @@ app.post('/api/whatsapp/send-demo', async (req, res) => {
 
 // Individual Sending (Direct Send from Dashboard)
 app.post('/api/whatsapp/send-individual', async (req, res) => {
-    const { accountId, guestId, template, imageUrl } = req.body;
+    const { accountId, guestId, template, imageUrl, safeMode = true } = req.body;
 
     try {
         // 1. Fetch Guest
@@ -1686,8 +1847,9 @@ app.post('/api/whatsapp/send-individual', async (req, res) => {
         // 2. Discover active instance (using accountId as hint)
         const instanceName = await discoverActiveInstance() || accountId;
 
-        // 3. Process Template
-        let finalMessage = template.replace(/{name}/g, guest.name || 'الضيف الكريم');
+        // 3. Process Template with Spintax
+        let processedTemplate = applySpintax(template);
+        let finalMessage = processedTemplate.replace(/{name}/g, guest.name || 'الضيف الكريم');
         
         // Add buttons instruction if not present
         if (!finalMessage.includes('1') && !finalMessage.includes('تأكيد')) {
@@ -1696,15 +1858,23 @@ app.post('/api/whatsapp/send-individual', async (req, res) => {
 
         const jid = normalizePhone(guest.phone);
 
-        console.log(`[Direct] 📤 Sending to ${guest.name} (${jid})...`);
+        console.log(`[Direct] 📤 Sending to ${guest.name} (${jid})... [SafeMode: ${safeMode}]`);
+
+        // Apply Typing Simulation if SafeMode
+        if (safeMode) {
+            await setTypingStatus(instanceName, jid, 4000);
+        }
 
         let result;
-        if (imageUrl) {
+        // IN SAFE MODE: We NEVER send image in the first message (Phase 1)
+        const effectiveImageUrl = (safeMode && guest.is_first_message !== false) ? null : imageUrl;
+
+        if (effectiveImageUrl) {
             result = await callEvolutionWithInstance(`/message/sendMedia`, instanceName, 'POST', {
                 number: jid,
                 mediatype: "image",
                 caption: finalMessage,
-                media: imageUrl,
+                media: effectiveImageUrl,
                 fileName: 'invitation.png'
             });
         } else {
@@ -2189,21 +2359,19 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
                 
                 // For 'unsent', skip if they already have whatsapp_messages
                 if (targetAudience === 'unsent' && g.whatsapp_messages && g.whatsapp_messages.length > 0) return false;
-                
                 return true;
             })
-            .map(guest => {
-                const variables = getTemplateVariables(guest, event);
+            .map(async (guest) => {
+                const variables = await getTemplateVariables(guest, event);
+                
                 let messageText = customMessage
                     ? fillTemplate(customMessage, variables)
                     : fillTemplate(template, variables);
 
-                // Auto-append 1/2 instructions for 'invite' phase ONLY if NOT in direct send mode
-                if (!isDirectSend && messagePhase === 'invite' && !messageText.includes('1') && !messageText.includes('تأكيد')) {
+                if (provider !== 'meta' && !isDirectSend && messagePhase === 'invite' && !messageText.includes('1') && !messageText.includes('تأكيد')) {
                     messageText += "\n\n1️⃣ للتأكيد\n2️⃣ للاعتذار";
                 }
                 
-                // If direct send is enabled, we allow using the guest's personalized card even in invite phase
                 const finalImageUrl = (isDirectSend && messagePhase === 'invite' && guest.card_image_url) 
                     ? guest.card_image_url 
                     : (messagePhase === 'invite' ? (globalImageUrl || null) : guest.card_image_url);
@@ -2215,14 +2383,18 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
                     message_text: messageText,
                     image_url: finalImageUrl,
                     message_phase: messagePhase,
-                    status: 'pending'
+                    status: 'pending',
+                    template_name: provider === 'meta' ? (account.invitation_template || 'lony_invite') : null
                 };
             });
 
-        if (messages.length > 0) {
-            const { data, error } = await supabase.from('whatsapp_messages').insert(messages).select();
+        // Wait for all async maps to complete
+        const finalMessages = await Promise.all(messages);
+
+        if (finalMessages.length > 0) {
+            const { data, error } = await supabase.from('whatsapp_messages').insert(finalMessages).select();
             if (error) throw error;
-            res.json({ success: true, count: messages.length, messages: data });
+            res.json({ success: true, count: finalMessages.length, messages: data });
         } else {
             res.json({ success: true, count: 0, messages: [], message: 'No eligible guests found' });
         }
@@ -2234,6 +2406,189 @@ app.post('/api/whatsapp/prepare-messages', async (req, res) => {
         preparingLocks.delete(req.body.eventId);
     }
 });
+
+// --- META WEBHOOK HANDLERS ---
+
+// Proxy Test Endpoint (to verify connectivity)
+app.get('/meta-webhook-test', (req, res) => {
+    res.json({ 
+        success: true, 
+        message: '🚀 Lony Meta Proxy is ALIVE (Port 3001)!',
+        time: new Date().toISOString()
+    });
+});
+
+// Verification Endpoint (GET)
+app.get('/meta-webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode && token) {
+        if (mode === 'subscribe' && token === 'lony_invite_v1_secure') {
+            console.log('[Meta Webhook] Verified successfully!');
+            res.status(200).send(challenge);
+        } else {
+            console.error('[Meta Webhook] Verification failed. Token mismatch.');
+            res.sendStatus(403);
+        }
+    }
+});
+
+// Message Payload Endpoint (POST)
+app.post('/meta-webhook', async (req, res) => {
+    try {
+        const body = req.body;
+        console.log('[Meta Webhook] Received payload:', JSON.stringify(body, null, 2));
+
+        if (body.object === 'whatsapp_business_account') {
+            const entry = body.entry?.[0];
+            const changes = entry?.changes?.[0];
+            const value = changes?.value;
+            const messages = value?.messages;
+
+            if (messages && messages.length > 0) {
+                const message = messages[0];
+                const from = message.from; // Phone number
+                const buttonText = message.button?.text || message.interactive?.button_reply?.title;
+
+                console.log(`[Meta Webhook] Message from ${from}: ${buttonText || 'No button text'}`);
+
+                if (buttonText === '✅ تأكيد الحضور' || buttonText === '✅ أبشروا بالحضور') {
+                    console.log(`[Meta Webhook] Guest ${from} confirmed attendance!`);
+                    // Logic to update DB and send QR card will go here
+                    await handleGuestRSVP(from, 'confirmed');
+                } else if (buttonText === '❌ اعتذار' || buttonText === '❌ اعتذار، والبركة فيكم') {
+                    console.log(`[Meta Webhook] Guest ${from} declined.`);
+                    await handleGuestRSVP(from, 'declined');
+                }
+            }
+            res.sendStatus(200);
+        } else {
+            res.sendStatus(404);
+        }
+    } catch (err) {
+        console.error('[Meta Webhook] Error:', err.message);
+        res.sendStatus(500);
+    }
+});
+
+async function handleGuestRSVP(phone, status) {
+    console.log(`[RSVP] Updating guest ${phone} to ${status}...`);
+    
+    // Normalize phone for Supabase lookup (Meta sends phone without + usually)
+    const normalizedPhone = phone.replace(/\D/g, '');
+    
+    try {
+        // 1. Find the guest for this phone
+        const { data: guests, error: findError } = await supabase
+            .from('guests')
+            .select('*')
+            .ilike('phone', `%${normalizedPhone.slice(-9)}%`) // Match last 9 digits for safety
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        if (findError || !guests || guests.length === 0) {
+            console.log(`[RSVP] No guest found for phone: ${normalizedPhone}`);
+            return;
+        }
+
+        const guest = guests[0];
+        console.log(`[RSVP] Found guest: ${guest.name} for event: ${guest.event_id}`);
+
+        // 2. Update RSVP Status
+        const { error: updateError } = await supabase
+            .from('guests')
+            .update({ 
+                rsvp_status: status,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', guest.id);
+
+        if (updateError) throw updateError;
+        console.log(`[RSVP] Successfully updated ${guest.name} to ${status}`);
+
+        // 3. Send Confirmation / Card
+        if (status === 'confirmed') {
+            await sendMetaCloudMessage(phone, `أهلاً بك يا ${guest.name}! 🎉 تم تأكيد حضورك بنجاح. سنرسل لك كرت الدعوة الخاص بك الآن...`);
+            
+            // For now, send the general card image as a placeholder or specific one if you want
+            // In the future, we can generate a personalized one here.
+            const cardUrl = guest.card_image_url || `${process.env.PUBLIC_URL || 'https://lonyinvit.netlify.app'}/test-cards/general.jpg`;
+            await sendMetaCloudImage(phone, cardUrl, "كرت دعوتك الرسمي 💐");
+        } else {
+            await sendMetaCloudMessage(phone, `نأسف لعدم تمكنك من الحضور يا ${guest.name} 😔. نتمنى لك كل التوفيق!`);
+        }
+
+    } catch (err) {
+        console.error('[RSVP] Error in handleGuestRSVP:', err.message);
+    }
+}
+
+/**
+ * Helper to send Text Message via Meta Cloud API
+ */
+async function sendMetaCloudMessage(to, text) {
+    if (!META_ACCESS_TOKEN || !META_PHONE_NUMBER_ID) {
+        console.warn('[Meta API] Missing credentials, cannot send message.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`https://graph.facebook.com/${META_VERSION}/${META_PHONE_NUMBER_ID}/messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                to: to,
+                type: "text",
+                text: { body: text }
+            })
+        });
+
+        const data = await response.json();
+        console.log('[Meta API] Text sent result:', JSON.stringify(data));
+    } catch (err) {
+        console.error('[Meta API] Send error:', err.message);
+    }
+}
+
+/**
+ * Helper to send Image Message via Meta Cloud API
+ */
+async function sendMetaCloudImage(to, imageUrl, caption) {
+    if (!META_ACCESS_TOKEN || !META_PHONE_NUMBER_ID) {
+        console.warn('[Meta API] Missing credentials, cannot send image.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`https://graph.facebook.com/${META_VERSION}/${META_PHONE_NUMBER_ID}/messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                to: to,
+                type: "image",
+                image: {
+                    link: imageUrl,
+                    caption: caption
+                }
+            })
+        });
+
+        const data = await response.json();
+        console.log('[Meta API] Image sent result:', JSON.stringify(data));
+    } catch (err) {
+        console.error('[Meta API] Image send error:', err.message);
+    }
+}
 
 // B2: Add Replacement Endpoint
 app.post('/api/whatsapp/add-replacement', async (req, res) => {
@@ -2349,9 +2704,9 @@ app.post('/api/whatsapp/send-replacement', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', async () => {
-    console.log(`\n🚀 Adapter Server running on port ${PORT}`);
-    console.log(`🔗 Connected to Evolution API at ${EVOLUTION_URL}`);
-    console.log(`🛡️  Evolution API Key: ...${EVOLUTION_API_KEY.slice(-4)}`);
+    console.log(`\n🛡️  Lony Meta-Cloud Server running on port ${PORT}`);
+    console.log(`📡  Meta Webhook Status: Listening for RSVP interactions...`);
+    console.log(`✅  Card Image Service: Serving personalized cards from /test-cards/`);
 
     // === AUTO-REGISTER WEBHOOK WITH ALL EVOLUTION INSTANCES ===
     const PUBLIC_URL = process.env.PUBLIC_URL;

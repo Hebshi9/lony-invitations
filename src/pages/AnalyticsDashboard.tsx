@@ -12,7 +12,8 @@ const AnalyticsDashboard: React.FC = () => {
         totalInvited: 0,
         confirmed: 0,
         scanned: 0,
-        whatsappSent: 0
+        whatsappSent: 0,
+        whatsappRead: 0
     });
     const [events, setEvents] = useState<any[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<string>('');
@@ -57,22 +58,22 @@ const AnalyticsDashboard: React.FC = () => {
             const confirmedCount = guests?.filter(g => g.rsvp_status === 'confirmed').length || 0;
             const generatedCount = guests?.filter(g => g.card_generated).length || 0;
 
-            // 2. Scans
-            const { count: scanCount } = await supabase
-                .from('scans')
-                .select('*', { count: 'exact', head: true })
-                .eq('event_id', selectedEventId);
+            // 3. WhatsApp Stats
+            const { data: waMsgs } = await supabase
+                .from('whatsapp_messages')
+                .select('status, guest_id')
+                .in('guest_id', guests?.map(g => g.id) || []);
 
-            // 3. WhatsApp Sent (Actual check on guests table if we have a field, 
-            // otherwise use a proxy but label it correctly)
-            const invitedCount = guests?.filter(g => g.status === 'ready_to_send' || g.status === 'sent').length || 0;
+            const sentCount = waMsgs?.filter(m => ['sent', 'delivered', 'read'].includes(m.status)).length || 0;
+            const readCount = waMsgs?.filter(m => m.status === 'read').length || 0;
 
             setStats({
                 totalGuests: total,
                 totalInvited: generatedCount,
                 confirmed: confirmedCount,
                 scanned: scanCount || 0,
-                whatsappSent: invitedCount
+                whatsappSent: sentCount,
+                whatsappRead: readCount
             });
 
         } catch (error) {
@@ -198,34 +199,31 @@ const AnalyticsDashboard: React.FC = () => {
             const { data: guests, error } = await supabase
                 .from('guests')
                 .select(`
-                    name,
-                    phone,
-                    table_no,
-                    category,
-                    companions_count,
-                    status,
-                    card_generated,
-                    card_generated_at,
-                    card_number,
-                    qr_token
+                    id, name, phone, table_no, category, companions_count,
+                    rsvp_status, card_generated, card_generated_at, card_number, qr_token, checked_in,
+                    whatsapp_messages (status)
                 `)
                 .eq('event_id', selectedEventId);
 
             if (error || !guests) throw error;
 
             // Transform data for clean excel
-            const excelRows = guests.map(g => ({
-                'الاسم': g.name,
-                'رقم الجوال': g.phone,
-                'رقم الطاولة': g.table_no,
-                'الفئة': g.category,
-                'عدد المرافقين': g.companions_count,
-                'الحالة (RSVP)': g.rsvp_status === 'confirmed' ? 'حاضر' : g.rsvp_status === 'declined' ? 'معتذر' : 'معلق',
-                'تم توليد الكرت': g.card_generated ? 'نعم' : 'لا',
-                'رقم الكرت': g.card_number,
-                'تاريخ التوليد': g.card_generated_at ? new Date(g.card_generated_at).toLocaleDateString('ar-SA') : '-',
-                'رابط الدعوة': `https://lonyinvit.netlify.app/check-in.html?token=${g.qr_token}`
-            }));
+            const excelRows = guests.map(g => {
+                const msgs = g.whatsapp_messages || [];
+                const latest = msgs[0]?.status || 'pending';
+                return {
+                    'الاسم': g.name,
+                    'رقم الجوال': g.phone,
+                    'رقم الطاولة': g.table_no,
+                    'الفئة': g.category,
+                    'عدد المرافقين': g.companions_count,
+                    'الحالة (RSVP)': g.rsvp_status === 'confirmed' ? 'مؤكد' : g.rsvp_status === 'declined' ? 'معتذر' : 'لم يرد',
+                    'حضر القاعة': g.checked_in ? 'نعم' : 'لا',
+                    'حالة الرسالة': latest === 'read' ? '👁️ تمت القراءة' : latest === 'delivered' ? '📥 وصلت' : latest === 'sent' ? '📤 مرسلة' : '⏳ -',
+                    'تاريخ التوليد': g.card_generated_at ? new Date(g.card_generated_at).toLocaleDateString('ar-SA') : '-',
+                    'رابط الدعوة': `https://lonyinvit.netlify.app/check-in.html?token=${g.qr_token}`
+                };
+            });
 
             // Generate Sheet
             const ws = XLSX.utils.json_to_sheet(excelRows);
@@ -344,6 +342,18 @@ const AnalyticsDashboard: React.FC = () => {
                         </div>
                         <div className="bg-green-100 p-3 rounded-full text-green-600">
                             <CheckCircle className="w-6 h-6" />
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                            <p className="text-sm text-gray-500 mb-1">نسبة الفتح (Read Rate)</p>
+                            <h3 className="text-3xl font-bold text-indigo-600">{stats.whatsappSent > 0 ? Math.round((stats.whatsappRead / stats.whatsappSent) * 100) : 0}%</h3>
+                        </div>
+                        <div className="bg-indigo-100 p-3 rounded-full text-indigo-600">
+                            <Eye className="w-6 h-6" />
                         </div>
                     </CardContent>
                 </Card>

@@ -14,6 +14,8 @@ const ClientDashboard: React.FC = () => {
     const [confirmedGuests, setConfirmedGuests] = useState(0);
     const [declinedGuests, setDeclinedGuests] = useState(0);
     const [pendingGuests, setPendingGuests] = useState(0);
+    const [waStats, setWaStats] = useState({ sent: 0, delivered: 0, read: 0 });
+ wagons: []
     const [totalIndividuals, setTotalIndividuals] = useState(0);
     const [attendedIndividuals, setAttendedIndividuals] = useState(0);
     const [replacements, setReplacements] = useState<any[]>([]);
@@ -67,7 +69,12 @@ const ClientDashboard: React.FC = () => {
             // Get all guests for this event
             const { data: guests, error: guestsError } = await supabase
                 .from('guests')
-                .select('*')
+                .select(`
+                    *,
+                    whatsapp_messages (
+                        status, delivery_status, created_at
+                    )
+                `)
                 .eq('event_id', eventData.id)
                 .order('created_at', { ascending: false });
 
@@ -84,6 +91,20 @@ const ClientDashboard: React.FC = () => {
             setConfirmedGuests(confirmed);
             setDeclinedGuests(declined);
             setPendingGuests(guests?.filter(g => !g.rsvp_status || g.rsvp_status === 'pending').length || 0);
+
+            // Calculate WA Stats
+            const processedGuests = guests?.map(g => {
+                const msgs = g.whatsapp_messages || [];
+                msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                return { ...g, last_wa_status: msgs[0]?.status || 'pending' };
+            }) || [];
+
+            setGuestsList(processedGuests);
+            setWaStats({
+                sent: processedGuests.filter(g => ['sent', 'delivered', 'read'].includes(g.last_wa_status)).length,
+                delivered: processedGuests.filter(g => ['delivered', 'read'].includes(g.last_wa_status)).length,
+                read: processedGuests.filter(g => g.last_wa_status === 'read').length
+            });
 
             // Calculate Individuals (Guest + Companions)
             const totalIndiv = guests?.reduce((acc, g) => acc + 1 + (g.companions_count || 0), 0) || 0;
@@ -425,6 +446,38 @@ const ClientDashboard: React.FC = () => {
                             </Card>
                         </div>
 
+                        {/* WhatsApp Engagement Card */}
+                        <Card className="border-none shadow-md bg-gradient-to-br from-indigo-600 to-slate-900 text-white overflow-hidden relative">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl"></div>
+                            <CardContent className="p-5">
+                                <div className="flex justify-between items-center mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="p-2 bg-white/10 rounded-lg"><Activity className="w-4 h-4 text-indigo-300" /></div>
+                                        <h4 className="text-xs font-black uppercase tracking-widest opacity-80">تفاعل الواتساب</h4>
+                                    </div>
+                                    <span className="text-[10px] font-bold bg-indigo-500/30 px-2 py-1 rounded-full border border-indigo-400/20">LIVE DATA</span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                    <div className="flex flex-col">
+                                        <span className="text-xl font-black">{waStats.sent}</span>
+                                        <span className="text-[9px] opacity-60">تم الإرسال</span>
+                                    </div>
+                                    <div className="flex flex-col border-x border-white/10">
+                                        <span className="text-xl font-black text-emerald-400">{waStats.delivered}</span>
+                                        <span className="text-[9px] opacity-60">وصلت</span>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-xl font-black text-blue-400">{waStats.read}</span>
+                                        <span className="text-[9px] opacity-60">قُرأت</span>
+                                    </div>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
+                                    <span className="text-[10px] font-bold opacity-60">نسبة فتح الرسائل (Open Rate)</span>
+                                    <span className="text-sm font-black text-indigo-300">{waStats.sent > 0 ? Math.round((waStats.read / waStats.sent) * 100) : 0}%</span>
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         {/* RSVP Progress Bar */}
                         <Card className="border-none shadow-md">
                             <CardContent className="p-4">
@@ -497,13 +550,25 @@ const ClientDashboard: React.FC = () => {
                                                     <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">لم يحضر بعد</span>
                                                 )}
 
-                                                {/* RSVP Status */}
-                                                {(guest.override_status === 'confirmed' || guest.rsvp_status === 'confirmed') && (
-                                                    <span className="text-blue-600 text-[10px] font-bold">مؤكد حضوره</span>
-                                                )}
-                                                {(guest.override_status === 'declined' || guest.rsvp_status === 'declined') && (
-                                                    <span className="text-red-500 text-[10px] font-bold">معتذر</span>
-                                                )}
+                                                {/* WhatsApp Status Mini-Icon */}
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    {guest.last_wa_status === 'read' ? (
+                                                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">
+                                                            <Eye className="w-2.5 h-2.5" /> تمت القراءة
+                                                        </div>
+                                                    ) : guest.last_wa_status === 'delivered' ? (
+                                                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                                            <MailCheck className="w-2.5 h-2.5" /> استلمها الضيف
+                                                        </div>
+                                                    ) : null}
+                                                    
+                                                    {guest.rsvp_status === 'confirmed' && (
+                                                        <span className="text-blue-600 text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded">مؤكد حضوره</span>
+                                                    )}
+                                                    {guest.rsvp_status === 'declined' && (
+                                                        <span className="text-red-500 text-[10px] font-bold bg-red-50 px-1.5 py-0.5 rounded">معتذر</span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     ))}

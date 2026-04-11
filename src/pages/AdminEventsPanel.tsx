@@ -157,9 +157,9 @@ const AdminEventsPanel: React.FC = () => {
                                         <h3 className="text-xl font-bold text-lony-navy font-amiri group-hover:text-lony-gold transition-colors">
                                             {event.name || 'بدون اسم'}
                                         </h3>
-                                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${(event.date && new Date(event.date) < new Date()) ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'
+                                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${(event.date && new Date(event.date + 'T23:59:59') < new Date()) ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'
                                             }`}>
-                                            {(event.date && new Date(event.date) < new Date()) ? 'منتهية' : 'نشطة'}
+                                            {(event.date && new Date(event.date + 'T23:59:59') < new Date()) ? 'منتهية' : 'نشطة'}
                                         </span>
                                     </div>
                                     <div className="flex flex-wrap gap-4 mt-4">

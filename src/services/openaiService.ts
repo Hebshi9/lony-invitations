@@ -158,3 +158,58 @@ async function base64ToFile(base64: string, filename: string): Promise<File> {
     const blob = await res.blob();
     return new File([blob], filename, { type: "image/png" });
 }
+
+/**
+ * Uses GPT-4o to parse a raw text list of guests into structured data.
+ * Understands Arabic/English and identifies companion counts.
+ */
+export const parseGuestsFromText = async (text: string): Promise<{ name: string, companions: number }[]> => {
+    try {
+        const openai = getOpenAIClient();
+
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "system",
+                    content: `You are an expert event data parser. 
+          Extract guest names and companion counts from the provided text.
+          
+          Rules:
+          - If someone says "Name + family" or "Name وعائلته", assume 4 companions.
+          - If someone says "Name + wife" or "Name وحرمه", assume 1 companion.
+          - If someone says "Name + X", where X is a number, companions = X.
+          - If only a name is provided, companions = 0.
+          
+          Return ONLY a JSON object with this structure:
+          {
+            "guests": [
+              { "name": "Mohammed Ahmed", "companions": 3 },
+              { "name": "Khalid", "companions": 0 }
+            ]
+          }`
+                },
+                {
+                    role: "user",
+                    content: `Parse this list of guests:\n\n${text}`
+                }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1, 
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) throw new Error("No data returned from AI");
+
+        const result = JSON.parse(content);
+        return result.guests || [];
+
+    } catch (error) {
+        console.error("OpenAI Parsing Failed:", error);
+        // Fallback: simple line split if AI fails
+        return text.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(name => ({ name, companions: 0 }));
+    }
+};

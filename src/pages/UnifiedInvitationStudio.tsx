@@ -2,13 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { hasFeature } from '../lib/features';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2 } from 'lucide-react';
+import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2, Search, Plus, Edit2, Layers, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import * as QRCode from 'qrcode';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
-import { analyzeInvitationLayout, cleanImageBackground } from '../services/openaiService';
+import { analyzeInvitationLayout, cleanImageBackground, parseGuestsFromText } from '../services/openaiService';
 import { v4 as uuidv4 } from 'uuid';
 import html2canvas from 'html2canvas';
 
@@ -34,6 +34,8 @@ interface Guest {
     serial?: string;
     companions_count: number;
     qr_payload?: string; // Payload used for scanning
+    batch_number?: number; // New: Batch tracking
+    card_image_url?: string;
 }
 
 interface DesignElement {
@@ -139,6 +141,20 @@ function UnifiedInvitationStudioContent() {
     const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
     const [pendingGuestInput, setPendingGuestInput] = useState('');
 
+    // New Mappings and Logic States
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedBatch, setSelectedBatch] = useState<number | 'all'>('all');
+    const [importTab, setImportTab] = useState<'numbered' | 'ai'>('ai');
+    const [aiInputText, setAiInputText] = useState('');
+    const [isParsingAI, setIsParsingAI] = useState(false);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [newNameValue, setNewNameValue] = useState('');
+
+    const [rangeFrom, setRangeFrom] = useState(1);
+    const [rangeTo, setRangeTo] = useState(50);
+    const [exportTarget, setExportTarget] = useState<'filtered' | 'range' | 'batch'>('filtered');
+    const [exportBatchNum, setExportBatchNum] = useState<number>(1);
+
 
     // Refs
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,8 +162,79 @@ function UnifiedInvitationStudioContent() {
     const dragOffsetRef = useRef({ x: 0, y: 0 });
     const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
-    const currentGuest = guests[currentGuestIndex];
+    const filteredGuests = guests.filter(g => {
+        const matchesSearch = (g.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (g.serial || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (g.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesBatch = selectedBatch === 'all' || g.batch_number === (selectedBatch as number);
+        return matchesSearch && matchesBatch;
+    });
+
+    const currentGuest = filteredGuests[currentGuestIndex];
     const selectedElement = elements.find(el => el.id === selectedId);
+
+    const getNextBatchNumber = () => {
+        if (guests.length === 0) return 1;
+        const maxBatch = Math.max(...guests.map(g => g.batch_number || 0));
+        return maxBatch + 1;
+    };
+
+    const handleUpdateGuestName = async () => {
+        if (!currentGuest || !newNameValue.trim() || !selectedEventId) return;
+        setSaving(true);
+        try {
+            const { error } = await supabase.from('guests').update({ name: newNameValue }).eq('id', currentGuest.id);
+            if (error) throw error;
+
+            // Update local state
+            setGuests(guests.map(g => g.id === currentGuest.id ? { ...g, name: newNameValue } : g));
+            setIsEditingName(false);
+        } catch (e: any) {
+            alert("فشل التعديل: " + e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAIImport = async () => {
+        if (!aiInputText.trim() || !selectedEventId) return;
+        setIsParsingAI(true);
+        try {
+            const parsed = await parseGuestsFromText(aiInputText);
+            if (parsed.length === 0) {
+                alert("لم يتم العثور على بيانات واضحة. يرجى التأكد من النص.");
+                return;
+            }
+
+            const nextBatch = getNextBatchNumber();
+            const startSerial = bulkStart + guests.length;
+
+            const newGuestsToInsert = parsed.map((p, idx) => ({
+                id: uuidv4(),
+                event_id: selectedEventId,
+                name: p.name,
+                qr_token: uuidv4(),
+                status: 'pending',
+                serial: (bulkPrefix || '') + (startSerial + idx).toString().padStart(bulkPadding, '0'),
+                companions_count: p.companions || 0,
+                batch_number: nextBatch,
+                qr_payload: uuidv4()
+            }));
+
+            const { error } = await supabase.from('guests').insert(newGuestsToInsert);
+            if (error) throw error;
+
+            alert(`✅ تم استيراد ${parsed.length} ضيف بنجاح في الدفعة رقم ${nextBatch}`);
+            setAiInputText('');
+            setShowBulkAddDialog(false);
+            handleEventSelect(selectedEventId);
+        } catch (e: any) {
+            console.error(e);
+            alert("فشل الاستيراد الذكي: " + e.message);
+        } finally {
+            setIsParsingAI(false);
+        }
+    };
 
     // --- Load Events ---
     const [eventsList, setEventsList] = useState<{ id: string, name: string, date: string, features?: any, host_pin?: string }[]>([]);
@@ -746,15 +833,15 @@ function UnifiedInvitationStudioContent() {
 
 
     // --- Publish to Database (WhatsApp Ready) ---
-    const publishToDatabase = async () => {
+    const publishToDatabase = async (overrideGuests?: Guest[]) => {
         if (!selectedEventId) return;
 
-        // FILTER: Exclude "Future Guest"
-        const validGuests = guests.filter(g => (g.name || '').trim().toLowerCase() !== 'future guest');
+        const targetList = overrideGuests || filteredGuests;
+        const validGuests = targetList.filter(g => (g.name || '').trim().toLowerCase() !== 'future guest');
 
         if (validGuests.length === 0) return alert("لا يوجد ضيوف صالحين لتحديث بياناتهم");
 
-        const confirm = window.confirm("سيتم توليد " + validGuests.length + " بطاقة (تم استبعاد \"ضيف مستقبلي\") ورفعها لقاعدة البيانات. هل أنت متأكد؟");
+        const confirm = window.confirm("سيتم توليد " + validGuests.length + " بطاقة ورفعها لقاعدة البيانات. هل أنت متأكد؟");
         if (!confirm) return;
 
         setSaving(true);
@@ -895,8 +982,9 @@ function UnifiedInvitationStudioContent() {
     };
 
 
-    const handleBulkDownload = async () => {
-        const validGuests = guests.filter(g => (g.name || '').trim().toLowerCase() !== 'future guest');
+    const handleBulkDownload = async (overrideGuests?: Guest[]) => {
+        const targetList = overrideGuests || filteredGuests;
+        const validGuests = targetList.filter(g => (g.name || '').trim().toLowerCase() !== 'future guest');
         if (!validGuests.length) return;
 
         setGenerating(true);
@@ -1617,10 +1705,44 @@ function UnifiedInvitationStudioContent() {
                 {mode === 'fields' && (
                     <Card className="flex-1 animate-in slide-in-from-left overflow-auto border-0 shadow-none bg-transparent">
                         <CardHeader className="px-4 py-2">
-                            <CardTitle className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                                <Settings2 className="w-4 h-4 text-amber-500" />
-                                أدوات التصميم
-                            </CardTitle>
+                            <div className="flex flex-col gap-3">
+                                <CardTitle className="text-sm font-bold text-gray-800 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Settings2 className="w-4 h-4 text-amber-500" />
+                                        أدوات التصميم
+                                    </div>
+                                    <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                                        {filteredGuests.length} متاح
+                                    </span>
+                                </CardTitle>
+
+                                {/* Search & Batch Selection */}
+                                <div className="space-y-2 pb-2 border-b border-gray-100">
+                                    <div className="relative">
+                                        <Search className="absolute right-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="بحث بالاسم أو الرقم..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="w-full bg-gray-50 border-gray-100 rounded-lg py-2 pr-9 pl-3 text-xs focus:ring-1 focus:ring-amber-200 outline-none transition-all placeholder:text-gray-300"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Filter className="w-3 h-3 text-gray-400" />
+                                        <select
+                                            value={selectedBatch}
+                                            onChange={(e) => setSelectedBatch(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                                            className="flex-1 bg-gray-50 border-gray-100 rounded-lg py-1.5 px-2 text-[10px] text-gray-600 outline-none"
+                                        >
+                                            <option value="all">كل الدفعات</option>
+                                            {Array.from(new Set(guests.map(g => g.batch_number).filter(Boolean))).sort().map(bn => (
+                                                <option key={bn} value={bn}>الدفعة {bn}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                         </CardHeader>
 
                         <CardContent className="space-y-3 px-4">
@@ -1967,10 +2089,32 @@ function UnifiedInvitationStudioContent() {
                     <Button size="icon" variant="ghost" onClick={() => setCurrentGuestIndex(Math.max(0, currentGuestIndex - 1))}>
                         <ChevronRight className="w-5 h-5" />
                     </Button>
-                    <span className="text-sm font-bold min-w-[100px] text-center">
-                        {currentGuest ? currentGuest.name : 'الاسم هنا'}
-                    </span>
-                    <Button size="icon" variant="ghost" onClick={() => setCurrentGuestIndex(Math.min(guests.length - 1, currentGuestIndex + 1))}>
+                    <div className="flex flex-col items-center">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold min-w-[100px] text-center">
+                                {currentGuest ? currentGuest.name : 'الاسم هنا'}
+                            </span>
+                            {currentGuest && (
+                                <button
+                                    onClick={() => {
+                                        setNewNameValue(currentGuest.name);
+                                        setIsEditingName(true);
+                                    }}
+                                    className="p-1 hover:bg-amber-100 rounded text-amber-600 transition-colors"
+                                    title="تعديل الاسم"
+                                >
+                                    <Edit2 size={12} />
+                                </button>
+                            )}
+                        </div>
+                        {currentGuest && (
+                            <div className="text-[9px] text-gray-400 flex items-center gap-1">
+                                {currentGuest.batch_number && <><Layers size={8} className="text-gray-300" /> دفعة {currentGuest.batch_number}</>}
+                                {currentGuest.serial && <> • {currentGuest.serial}</>}
+                            </div>
+                        )}
+                    </div>
+                    <Button size="icon" variant="ghost" onClick={() => setCurrentGuestIndex(Math.min(filteredGuests.length - 1, currentGuestIndex + 1))}>
                         <ChevronLeft className="w-5 h-5" />
                     </Button>
                     <div className="w-px h-6 bg-gray-300 mx-2"></div>
@@ -2101,27 +2245,84 @@ function UnifiedInvitationStudioContent() {
                             <hr className="border-gray-100" />
 
                             {/* Step 2: Download */}
-                            <div>
-                                <h4 className="font-bold text-gray-700 text-sm mb-2">2. التحميل النهائي:</h4>
+                            {/* Step 2: Download Options */}
+                            <div className="space-y-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                <h4 className="font-bold text-gray-700 text-xs mb-2">2. خيارات التحميل:</h4>
+                                
+                                <div className="space-y-2">
+                                    <label className="flex items-center gap-2 cursor-pointer p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-purple-100">
+                                        <input type="radio" name="exportTarget" checked={exportTarget === 'filtered'} onChange={() => setExportTarget('filtered')} className="accent-purple-600" />
+                                        <span className="text-xs text-gray-700">حسب الفلترة الحالية ({filteredGuests.length} ضيف)</span>
+                                    </label>
+                                    
+                                    <label className="flex flex-col gap-2 p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-purple-100">
+                                        <div className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="exportTarget" checked={exportTarget === 'batch'} onChange={() => setExportTarget('batch')} className="accent-purple-600" />
+                                            <span className="text-xs text-gray-700">حسب رقم الدفعة</span>
+                                        </div>
+                                        {exportTarget === 'batch' && (
+                                            <select 
+                                                value={exportBatchNum} 
+                                                onChange={(e) => setExportBatchNum(parseInt(e.target.value))}
+                                                className="mr-5 p-1 text-[10px] bg-white border border-gray-200 rounded"
+                                            >
+                                                {Array.from(new Set(guests.map(g => g.batch_number).filter(Boolean))).sort().map(bn => (
+                                                    <option key={bn} value={bn}>الدفعة {bn}</option>
+                                                ))}
+                                            </select>
+                                        )}
+                                    </label>
+
+                                    <label className="flex flex-col gap-2 p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-purple-100">
+                                        <div className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="exportTarget" checked={exportTarget === 'range'} onChange={() => setExportTarget('range')} className="accent-purple-600" />
+                                            <span className="text-xs text-gray-700">نطاق محدد (من - إلى)</span>
+                                        </div>
+                                        {exportTarget === 'range' && (
+                                            <div className="mr-5 flex items-center gap-2">
+                                                <input type="number" value={rangeFrom} onChange={(e) => setRangeFrom(parseInt(e.target.value))} className="w-16 p-1 text-[10px] border rounded" placeholder="من" />
+                                                <span className="text-[10px] text-gray-400">إلى</span>
+                                                <input type="number" value={rangeTo} onChange={(e) => setRangeTo(parseInt(e.target.value))} className="w-16 p-1 text-[10px] border rounded" placeholder="إلى" />
+                                            </div>
+                                        )}
+                                    </label>
+                                </div>
+
                                 <Button
-                                    onClick={handleBulkDownload}
+                                    onClick={() => {
+                                        let finalTarget = filteredGuests;
+                                        if (exportTarget === 'batch') {
+                                            finalTarget = guests.filter(g => g.batch_number === exportBatchNum);
+                                        } else if (exportTarget === 'range') {
+                                            finalTarget = guests.slice(rangeFrom - 1, rangeTo);
+                                        }
+                                        handleBulkDownload(finalTarget);
+                                    }}
                                     disabled={generating || guests.length === 0}
-                                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white h-12 shadow-lg shadow-green-200"
+                                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white h-12 shadow-lg shadow-green-200 mt-2"
                                 >
-                                    {generating ? 'جاري المعالجة...' : "تحميل الكل (" + guests.filter(g => (g.name || '').trim().toLowerCase() !== 'future guest').length + " بطاقة) ZIP"}
+                                    {generating ? 'جاري المعالجة...' : "تحميل المختارة (ZIP)"}
                                     <FileDown className="w-5 h-5 mr-2" />
                                 </Button>
                             </div>
 
                             <div className="pt-2">
                                 <Button
-                                    onClick={publishToDatabase}
+                                    onClick={() => {
+                                        let finalTarget = filteredGuests;
+                                        if (exportTarget === 'batch') {
+                                            finalTarget = guests.filter(g => g.batch_number === exportBatchNum);
+                                        } else if (exportTarget === 'range') {
+                                            finalTarget = guests.slice(rangeFrom - 1, rangeTo);
+                                        }
+                                        publishToDatabase(finalTarget);
+                                    }}
                                     disabled={saving}
                                     variant="outline"
                                     className="w-full border-green-200 text-green-700 hover:bg-green-50"
                                 >
                                     {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Smartphone className="w-4 h-4 mr-2" />}
-                                    تحديث قاعدة البيانات (واتساب)
+                                    تحديث قاعدة البيانات (المختارة فقط)
                                 </Button>
                                 <p className="text-[10px] text-center text-gray-400 mt-1">
                                     يربط الصور بجهات الاتصال لإرسالها عبر البوت
@@ -2199,16 +2400,50 @@ function UnifiedInvitationStudioContent() {
             {
                 showBulkAddDialog && (
                     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                        <Card className="w-full max-w-md animate-in zoom-in-95 duration-200 border border-purple-100 shadow-2xl">
-                            <CardHeader className="bg-purple-50/50">
-                                <CardTitle className="flex items-center gap-2 text-purple-900">
-                                    <Sparkles className="w-5 h-5 text-purple-600" />
-                                    إنشاء كروت مرقمة (تلقائي)
+                        <Card className="w-full max-w-2xl animate-in zoom-in-95 duration-200 border border-purple-100 shadow-2xl">
+                            <CardHeader className="bg-purple-50/50 pb-0">
+                                <CardTitle className="flex items-center justify-between text-purple-900">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-purple-600" />
+                                        إضافة ضيوف جدد
+                                    </div>
+                                    <div className="flex bg-white/50 p-1 rounded-lg border border-purple-100">
+                                        <button 
+                                            onClick={() => setImportTab('ai')}
+                                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${importTab === 'ai' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-400 hover:text-purple-600'}`}
+                                        >
+                                            استيراد ذكي (AI)
+                                        </button>
+                                        <button 
+                                            onClick={() => setImportTab('numbered')}
+                                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${importTab === 'numbered' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-400 hover:text-purple-600'}`}
+                                        >
+                                            ترقيم آلي
+                                        </button>
+                                    </div>
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4 pt-6">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">كم عدد الكروت التي تريد إنشاءها؟</label>
+                                {importTab === 'ai' ? (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">الصق الأسماء هنا (سيفهم الذكاء الاصطناعي المرافقين تلقائياً)</label>
+                                            <textarea
+                                                value={aiInputText}
+                                                onChange={(e) => setAiInputText(e.target.value)}
+                                                placeholder={`مثال:\nمحمد أحمد + 3\nخالد العتيبي وعائلته\nفهد وحرمه`}
+                                                className="w-full h-48 px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-100 focus:border-purple-400 outline-none transition-all text-right text-sm"
+                                                dir="rtl"
+                                            />
+                                        </div>
+                                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-[11px] text-blue-800 leading-relaxed shadow-sm">
+                                            <strong>💡 نصيحة:</strong> يمكنك نسخ قائمة الأسماء من الواتساب مباشرة ولصقها هنا. سيهتم النظام بالباقي.
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">كم عدد الكروت التي تريد إنشاءها؟</label>
                                     <input
                                         type="number"
                                         value={bulkAddCount}
@@ -2257,6 +2492,8 @@ function UnifiedInvitationStudioContent() {
                                         {bulkPrefix}{String(bulkStart).padStart(bulkPadding, '0')}
                                     </span>
                                 </div>
+                                    </>
+                                )}
                                 <div className="flex gap-3 mt-8">
                                     <Button
                                         variant="ghost"
@@ -2267,11 +2504,12 @@ function UnifiedInvitationStudioContent() {
                                     </Button>
                                     <Button
                                         className="flex-1 h-12 bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-lg shadow-purple-200 font-bold"
-                                        disabled={saving}
-                                        onClick={async () => {
+                                        disabled={saving || isParsingAI}
+                                        onClick={importTab === 'ai' ? handleAIImport : async () => {
                                             if (!selectedEventId) return;
                                             setSaving(true);
                                             try {
+                                                const nextBatch = getNextBatchNumber();
                                                 const newBatch = Array.from({ length: bulkAddCount }).map((_, i) => {
                                                     const num = bulkStart + i;
                                                     const serial = bulkPrefix + String(num).padStart(bulkPadding, '0');
@@ -2283,7 +2521,8 @@ function UnifiedInvitationStudioContent() {
                                                         status: 'confirmed',
                                                         qr_token: uuidv4(),
                                                         qr_payload: uuidv4(),
-                                                        companions_count: 0
+                                                        companions_count: 0,
+                                                        batch_number: nextBatch
                                                     };
                                                 });
 
@@ -2313,6 +2552,47 @@ function UnifiedInvitationStudioContent() {
                     </div>
                 )
             }
+            {/* Edit Name Modal */}
+            {isEditingName && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                    <Card className="w-full max-w-sm border border-amber-100 shadow-2xl animate-in zoom-in-95 duration-200">
+                        <CardHeader className="bg-amber-50/50">
+                            <CardTitle className="text-sm font-bold text-amber-900 flex items-center gap-2">
+                                <Edit2 size={16} /> تعديل اسم الضيف
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-4">
+                            <div>
+                                <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">الاسم المعروض</label>
+                                <input
+                                    type="text"
+                                    value={newNameValue}
+                                    onChange={(e) => setNewNameValue(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-amber-100 focus:border-amber-400 outline-none transition-all"
+                                    autoFocus
+                                    onKeyDown={(e) => e.key === 'Enter' && handleUpdateGuestName()}
+                                />
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <Button
+                                    variant="ghost"
+                                    className="flex-1 text-gray-500"
+                                    onClick={() => setIsEditingName(false)}
+                                >
+                                    إلغاء
+                                </Button>
+                                <Button
+                                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
+                                    onClick={handleUpdateGuestName}
+                                    disabled={saving}
+                                >
+                                    {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : "حفظ التعديل"}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
         </div >
     );
 }

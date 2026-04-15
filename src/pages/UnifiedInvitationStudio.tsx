@@ -155,6 +155,8 @@ function UnifiedInvitationStudioContent() {
     const [exportTarget, setExportTarget] = useState<'filtered' | 'range' | 'batch'>('filtered');
     const [exportBatchNum, setExportBatchNum] = useState<number>(1);
 
+    const [quickName, setQuickName] = useState('');
+
 
     // Refs
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -233,6 +235,36 @@ function UnifiedInvitationStudioContent() {
             alert("فشل الاستيراد الذكي: " + e.message);
         } finally {
             setIsParsingAI(false);
+        }
+    };
+
+    const handleAddQuickGuest = async () => {
+        if (!quickName.trim() || !selectedEventId) return;
+        setSaving(true);
+        try {
+            const nextBatch = getNextBatchNumber();
+            const startSerial = bulkStart + guests.length;
+            const newGuest = {
+                id: uuidv4(),
+                event_id: selectedEventId,
+                name: quickName.trim(),
+                qr_token: uuidv4(),
+                status: 'pending',
+                serial: (bulkPrefix || '') + (startSerial).toString().padStart(bulkPadding, '0'),
+                companions_count: 0,
+                batch_number: nextBatch,
+                qr_payload: uuidv4()
+            };
+
+            const { error } = await supabase.from('guests').insert([newGuest]);
+            if (error) throw error;
+
+            setQuickName('');
+            handleEventSelect(selectedEventId);
+        } catch (e: any) {
+            alert("فشل الإضافة: " + e.message);
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -1525,7 +1557,7 @@ function UnifiedInvitationStudioContent() {
                                 variant="outline"
                                 className="w-full text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 font-bold h-11"
                             >
-                                <Sparkles className="w-4 h-4 ml-2" /> إنشاء ضيوف مرقمين (ترقيم تلقائي)
+                                <Sparkles className="w-4 h-4 ml-2" /> إضافة ضيوف بالذكاء الاصطناعي (AI)
                             </Button>
 
                             <div className="relative">
@@ -1536,6 +1568,25 @@ function UnifiedInvitationStudioContent() {
                                     className="w-full text-green-700 border-green-200 bg-green-50 hover:bg-green-100 font-bold h-11"
                                 >
                                     <FileDown className="w-4 h-4 ml-2" /> استيراد من ملف إكسل
+                                </Button>
+                            </div>
+
+                            {/* Quick Add Guest - Moved here for visibility */}
+                            <div className="flex gap-2 pt-2">
+                                <input
+                                    type="text"
+                                    placeholder="اكتب اسماً لإضافته فوراً..."
+                                    value={quickName}
+                                    onChange={(e) => setQuickName(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddQuickGuest()}
+                                    className="flex-1 bg-white border border-gray-200 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-purple-200 outline-none transition-all"
+                                />
+                                <Button 
+                                    className="bg-purple-600 hover:bg-purple-700 text-white h-10 px-4"
+                                    onClick={handleAddQuickGuest}
+                                    disabled={saving}
+                                >
+                                    إضافة سريع
                                 </Button>
                             </div>
 
@@ -1742,6 +1793,7 @@ function UnifiedInvitationStudioContent() {
                                         </select>
                                     </div>
                                 </div>
+
                             </div>
                         </CardHeader>
 

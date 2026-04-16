@@ -155,7 +155,9 @@ function UnifiedInvitationStudioContent() {
     const [exportTarget, setExportTarget] = useState<'filtered' | 'range' | 'batch'>('filtered');
     const [exportBatchNum, setExportBatchNum] = useState<number>(1);
 
-    const [quickName, setQuickName] = useState('');
+    const [quickAIText, setQuickAIText] = useState('');
+    const [parsedGuests, setParsedGuests] = useState<{name: string, companions: number}[]>([]);
+    const [isAnalyzingQuick, setIsAnalyzingQuick] = useState(false);
 
 
     // Refs
@@ -238,31 +240,50 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
-    const handleAddQuickGuest = async () => {
-        if (!quickName.trim() || !selectedEventId) return;
+    const handleAnalyzeQuickText = async () => {
+        if (!quickAIText.trim()) return;
+        setIsAnalyzingQuick(true);
+        try {
+            const results = await parseGuestsFromText(quickAIText);
+            setParsedGuests(results);
+        } catch (e: any) {
+            alert("فشل التحليل: " + e.message);
+        } finally {
+            setIsAnalyzingQuick(false);
+        }
+    };
+
+    const handleAddParsedGuests = async () => {
+        if (parsedGuests.length === 0 || !selectedEventId) return;
         setSaving(true);
         try {
             const nextBatch = getNextBatchNumber();
-            const startSerial = bulkStart + guests.length;
-            const newGuest = {
-                id: uuidv4(),
-                event_id: selectedEventId,
-                name: quickName.trim(),
-                qr_token: uuidv4(),
-                status: 'pending',
-                serial: (bulkPrefix || '') + (startSerial).toString().padStart(bulkPadding, '0'),
-                companions_count: 0,
-                batch_number: nextBatch,
-                qr_payload: uuidv4()
-            };
+            let currentCount = guests.length;
+            
+            const newGuests = parsedGuests.map(pg => {
+                const serial = (bulkPrefix || '') + (bulkStart + currentCount).toString().padStart(bulkPadding, '0');
+                currentCount++;
+                return {
+                    id: uuidv4(),
+                    event_id: selectedEventId,
+                    name: pg.name,
+                    qr_token: uuidv4(),
+                    status: 'pending',
+                    serial: serial,
+                    companions_count: pg.companions || 0,
+                    batch_number: nextBatch,
+                    qr_payload: uuidv4()
+                };
+            });
 
-            const { error } = await supabase.from('guests').insert([newGuest]);
+            const { error } = await supabase.from('guests').insert(newGuests);
             if (error) throw error;
 
-            setQuickName('');
+            setQuickAIText('');
+            setParsedGuests([]);
             handleEventSelect(selectedEventId);
         } catch (e: any) {
-            alert("فشل الإضافة: " + e.message);
+            alert("فشل الحفظ: " + e.message);
         } finally {
             setSaving(false);
         }
@@ -1551,44 +1572,73 @@ function UnifiedInvitationStudioContent() {
 
                         {/* BULK GENERATE BUTTON */}
                         <hr className="my-2" />
-                        <div className="space-y-2">
+                            {/* Smart AI Input Section */}
+                            <div className="space-y-3 bg-purple-50/50 p-3 rounded-xl border border-purple-100 mb-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-purple-800 flex items-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5" /> المساعد الذكي للإضافة
+                                    </span>
+                                    {parsedGuests.length > 0 && (
+                                        <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            className="h-6 text-[10px] text-red-500 hover:text-red-600 px-2"
+                                            onClick={() => setParsedGuests([])}
+                                        >
+                                            إلغاء
+                                        </Button>
+                                    )}
+                                </div>
+                                
+                                <textarea
+                                    placeholder="شهد الحسن مرافق واحد&#10;محمد وحرمه&#10;خالد + 2"
+                                    value={quickAIText}
+                                    onChange={(e) => setQuickAIText(e.target.value)}
+                                    className="w-full h-24 bg-white border border-purple-100 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-purple-200 outline-none transition-all resize-none placeholder:text-gray-300"
+                                />
+                                
+                                {parsedGuests.length === 0 ? (
+                                    <Button 
+                                        className="w-full bg-purple-600 hover:bg-purple-700 text-white h-10 shadow-md shadow-purple-100"
+                                        onClick={handleAnalyzeQuickText}
+                                        disabled={isAnalyzingQuick || !quickAIText.trim()}
+                                    >
+                                        {isAnalyzingQuick ? (
+                                            <><RefreshCw className="w-4 h-4 ml-2 animate-spin" /> جاري التحليل...</>
+                                        ) : (
+                                            <><Sparkles className="w-4 h-4 ml-2" /> تحليل وتجهيز الكروت</>
+                                        )}
+                                    </Button>
+                                ) : (
+                                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                        <div className="max-h-32 overflow-y-auto space-y-1.5 p-1">
+                                            {parsedGuests.map((pg, idx) => (
+                                                <div key={idx} className="flex items-center justify-between bg-white px-2 py-1.5 rounded border border-purple-100 text-[11px]">
+                                                    <span className="font-bold text-gray-700">{pg.name}</span>
+                                                    <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                                                        {pg.companions > 0 ? `+ ${pg.companions} مرافق` : 'بدون مرافق'}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <Button 
+                                            className="w-full bg-green-600 hover:bg-green-700 text-white h-10 font-bold"
+                                            onClick={handleAddParsedGuests}
+                                            disabled={saving}
+                                        >
+                                            <CheckCircle className="w-4 h-4 ml-2" /> تأكيد وإضافة {parsedGuests.length} ضيوف
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+
                             <Button
                                 onClick={() => setShowBulkAddDialog(true)}
                                 variant="outline"
-                                className="w-full text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 font-bold h-11"
+                                className="w-full text-purple-700 border-purple-200 bg-white hover:bg-purple-50 font-bold h-11 mb-2"
                             >
-                                <Sparkles className="w-4 h-4 ml-2" /> إضافة ضيوف بالذكاء الاصطناعي (AI)
+                                <Sparkles className="w-4 h-4 ml-2" /> إضافة بالجملة (إكسل/نص)
                             </Button>
-
-                            <div className="relative">
-                                <input type="file" accept=".xlsx,.xls,.csv" onChange={handleExcelImport} className="hidden" id="excel-upload" />
-                                <Button
-                                    onClick={() => document.getElementById('excel-upload')?.click()}
-                                    variant="outline"
-                                    className="w-full text-green-700 border-green-200 bg-green-50 hover:bg-green-100 font-bold h-11"
-                                >
-                                    <FileDown className="w-4 h-4 ml-2" /> استيراد من ملف إكسل
-                                </Button>
-                            </div>
-
-                            {/* Quick Add Guest - Moved here for visibility */}
-                            <div className="flex gap-2 pt-2">
-                                <input
-                                    type="text"
-                                    placeholder="اكتب اسماً لإضافته فوراً..."
-                                    value={quickName}
-                                    onChange={(e) => setQuickName(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleAddQuickGuest()}
-                                    className="flex-1 bg-white border border-gray-200 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-purple-200 outline-none transition-all"
-                                />
-                                <Button 
-                                    className="bg-purple-600 hover:bg-purple-700 text-white h-10 px-4"
-                                    onClick={handleAddQuickGuest}
-                                    disabled={saving}
-                                >
-                                    إضافة سريع
-                                </Button>
-                            </div>
 
                             <Button
                                 onClick={generateAllCards}
@@ -1603,7 +1653,6 @@ function UnifiedInvitationStudioContent() {
                                     <div className="bg-green-600 h-2.5 rounded-full transition-all duration-300" style={{ width: ((progress.current / progress.total) * 100) + "%" }}></div>
                                 </div>
                             )}
-                        </div>
                     </CardContent>
                 </Card>
 

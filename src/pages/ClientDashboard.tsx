@@ -1,60 +1,70 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import config from '../lib/config';
-import { Card, CardContent } from '../components/ui/Card';
-import { Loader2, Users, CheckCircle, Activity, Lock, XCircle, Calendar, MapPin, Clock, ArrowLeftRight, UserPlus, UploadCloud, Image as ImageIcon } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { 
+    Loader2, Users, CheckCircle, Activity, Lock, XCircle, 
+    Calendar, MapPin, Clock, ArrowLeftRight, UserPlus, 
+    UploadCloud, Image as ImageIcon, LayoutDashboard, 
+    MessageSquare, Eye, CheckCheck, UserCheck, Timer, AlertCircle
+} from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis } from 'recharts';
 import * as QRCode from 'qrcode';
+
+const LONY_NAVY = '#2F3645';
+const LONY_GOLD = '#C5A059';
+const LONY_CREAM = '#FFF8E7';
+
 const ClientDashboard: React.FC = () => {
-    const { magicToken } = useParams<{ magicToken: string }>();
-    const [stats, setStats] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [totalGuests, setTotalGuests] = useState(0);
-    const [attendedGuests, setAttendedGuests] = useState(0);
-    const [confirmedGuests, setConfirmedGuests] = useState(0);
-    const [declinedGuests, setDeclinedGuests] = useState(0);
-    const [pendingGuests, setPendingGuests] = useState(0);
-    const [waStats, setWaStats] = useState({ sent: 0, delivered: 0, read: 0 });
- wagons: []
-    const [totalIndividuals, setTotalIndividuals] = useState(0);
-    const [attendedIndividuals, setAttendedIndividuals] = useState(0);
-    const [replacements, setReplacements] = useState<any[]>([]);
-    const [guestsList, setGuestsList] = useState<any[]>([]);
+    // Both params could be passed depending on the route
+    const { magicToken, orderId } = useParams<{ magicToken: string; orderId: string }>();
+    
     const [event, setEvent] = useState<any>(null);
+    const [guestsList, setGuestsList] = useState<any[]>([]);
+    const [replacements, setReplacements] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
     const [isExpired, setIsExpired] = useState(false);
     const [activeTab, setActiveTab] = useState<'overview' | 'guests' | 'replacements' | 'info'>('overview');
-
-    // Replacement Form State
+    
+    // UI State
+    const [isGeneratingId, setIsGeneratingId] = useState<string | null>(null);
     const [repName, setRepName] = useState('');
     const [repPhone, setRepPhone] = useState('');
     const [repCompanions, setRepCompanions] = useState(0);
     const [isSubmittingRep, setIsSubmittingRep] = useState(false);
-    const [isGeneratingId, setIsGeneratingId] = useState<string | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
     useEffect(() => {
         fetchData();
-        // Poll every 30 seconds
-        const interval = setInterval(fetchData, 30000);
+        const interval = setInterval(fetchData, 30000); // Live sync every 30s
         return () => clearInterval(interval);
-    }, [magicToken]);
+    }, [magicToken, orderId]);
 
     const fetchData = async () => {
         try {
-            // Get event by magicToken
-            const { data: eventData, error: eventError } = await supabase
-                .from('events')
-                .select('*')
-                .eq('magic_link_token', magicToken)
-                .single();
+            let query = supabase.from('events').select('*');
+            
+            // Fetch by either magicToken or orderId (standard event ID)
+            if (magicToken) {
+                query = query.eq('magic_link_token', magicToken);
+            } else if (orderId) {
+                query = query.eq('id', orderId);
+            } else {
+                setLoading(false);
+                return;
+            }
+
+            const { data: eventData, error: eventError } = await query.single();
 
             if (eventError || !eventData) {
                 setLoading(false);
-                return; // Invalid token
+                return;
             }
 
             setEvent(eventData);
 
-            // Check Expiration (48 hours after event date)
+            // Check Expiration (Privacy: 48 hours after event)
             if (eventData.date) {
                 const eventDate = new Date(eventData.date);
                 const now = new Date();
@@ -62,706 +72,326 @@ const ClientDashboard: React.FC = () => {
                 if (diffHours > 48) {
                     setIsExpired(true);
                     setLoading(false);
-                    return; // Stop fetching details if expired
+                    return;
                 }
             }
 
-            // Get all guests for this event
-            const { data: guests, error: guestsError } = await supabase
-                .from('guests')
-                .select(`
-                    *,
-                    whatsapp_messages (
-                        status, delivery_status, created_at
-                    )
-                `)
-                .eq('event_id', eventData.id)
-                .order('created_at', { ascending: false });
+            // Fetch Guests & Replacements in parallel for performance
+            const [guestsRes, repsRes] = await Promise.all([
+                supabase
+                    .from('guests')
+                    .select('*, whatsapp_messages(status, created_at)')
+                    .eq('event_id', eventData.id)
+                    .order('created_at', { ascending: false }),
+                supabase
+                    .from('guest_replacements')
+                    .select('*')
+                    .eq('event_id', eventData.id)
+                    .order('created_at', { ascending: false })
+            ]);
 
-            if (guestsError) throw guestsError;
-
-            setGuestsList(guests || []);
-            setTotalGuests(guests?.length || 0);
-
-            const attended = guests?.filter(g => g.status === 'attended').length || 0;
-            const confirmed = guests?.filter(g => g.rsvp_status === 'confirmed' || g.override_status === 'confirmed').length || 0;
-            const declined = guests?.filter(g => g.rsvp_status === 'declined' || g.override_status === 'declined').length || 0;
-
-            setAttendedGuests(attended);
-            setConfirmedGuests(confirmed);
-            setDeclinedGuests(declined);
-            setPendingGuests(guests?.filter(g => !g.rsvp_status || g.rsvp_status === 'pending').length || 0);
-
-            // Calculate WA Stats
-            const processedGuests = guests?.map(g => {
-                const msgs = g.whatsapp_messages || [];
-                msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-                return { ...g, last_wa_status: msgs[0]?.status || 'pending' };
-            }) || [];
-
-            setGuestsList(processedGuests);
-            setWaStats({
-                sent: processedGuests.filter(g => ['sent', 'delivered', 'read'].includes(g.last_wa_status)).length,
-                delivered: processedGuests.filter(g => ['delivered', 'read'].includes(g.last_wa_status)).length,
-                read: processedGuests.filter(g => g.last_wa_status === 'read').length
-            });
-
-            // Calculate Individuals (Guest + Companions)
-            const totalIndiv = guests?.reduce((acc, g) => acc + 1 + (g.companions_count || 0), 0) || 0;
-            const attendedIndiv = guests?.filter(g => g.status === 'attended').reduce((acc, g) => acc + 1 + (g.companions_attended || 0), 0) || 0;
-            setTotalIndividuals(totalIndiv);
-            setAttendedIndividuals(attendedIndiv);
-
-            // جلب البدلاء
-            const { data: reps } = await supabase
-                .from('guest_replacements')
-                .select('*')
-                .eq('event_id', eventData.id)
-                .order('created_at', { ascending: false });
-            setReplacements(reps || []);
-
+            if (guestsRes.data) {
+                const processed = guestsRes.data.map(g => {
+                    const sortedMsgs = (g.whatsapp_messages || []).sort(
+                        (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    );
+                    return { ...g, last_wa_status: sortedMsgs[0]?.status || 'pending' };
+                });
+                setGuestsList(processed);
+            }
+            
+            if (repsRes.data) setReplacements(repsRes.data);
+            
+            setLastUpdated(new Date());
             setLoading(false);
         } catch (e) {
-            console.error(e);
+            console.error('Data sync failed:', e);
             setLoading(false);
         }
     };
 
-    const handleAddReplacement = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!repName || !repPhone) return alert("الرجاء إدخال الاسم والرقم");
-        if (replacements.length >= declinedGuests) return alert("لقد استنفذت عدد البدلاء المتاح لك");
+    // Computed Stats
+    const stats = useMemo(() => {
+        if (!guestsList.length) return null;
+        
+        const total = guestsList.length;
+        const attended = guestsList.filter(g => g.status === 'attended').length;
+        const confirmed = guestsList.filter(g => (g.rsvp_status || g.override_status) === 'confirmed').length;
+        const declined = guestsList.filter(g => (g.rsvp_status || g.override_status) === 'declined').length;
+        const pending = total - confirmed - declined;
+        
+        const totalPeople = guestsList.reduce((acc, g) => acc + 1 + (g.companions_count || 0), 0);
+        const attendedPeople = guestsList.filter(g => g.status === 'attended').reduce((acc, g) => acc + 1 + (g.companions_attended || 0), 0);
+        
+        const wa = {
+            sent: guestsList.filter(g => ['sent', 'delivered', 'read'].includes(g.last_wa_status)).length,
+            delivered: guestsList.filter(g => ['delivered', 'read'].includes(g.last_wa_status)).length,
+            read: guestsList.filter(g => g.last_wa_status === 'read').length
+        };
 
-        setIsSubmittingRep(true);
-        try {
-            const API_BASE = config.api.whatsapp;
-            const res = await fetch(`${API_BASE}/add-replacement`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    event_id: event.id,
-                    name: repName,
-                    phone: repPhone,
-                    companions_count: repCompanions
-                })
-            });
-            const data = await res.json();
-            if (!data.success) throw new Error(data.error || 'Failed to add replacement');
+        return { total, attended, confirmed, declined, pending, totalPeople, attendedPeople, wa };
+    }, [guestsList]);
 
-            alert('تم إضافة البديل بنجاح وجاري تجهيز بطاقته!');
-            setRepName('');
-            setRepPhone('');
-            setRepCompanions(0);
-            fetchData(); // refresh list
-        } catch (err: any) {
-            console.error(err);
-            alert("خطأ: " + err.message);
-        } finally {
-            setIsSubmittingRep(false);
-        }
-    };
-
-    const sendReplacementCard = async (repId: string, guestId: string, imageUrl: string) => {
-        setIsGeneratingId(repId);
-        try {
-            const API_BASE = config.api.whatsapp;
-            const res = await fetch(`${API_BASE}/send-replacement`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    event_id: event.id,
-                    guest_id: guestId,
-                    image_url: imageUrl
-                })
-            });
-            const data = await res.json();
-            if (!data.success) throw new Error(data.error);
-
-            alert("تم التوليد والإرسال بنجاح!");
-            fetchData();
-        } catch (e: any) {
-            console.error(e);
-            alert("حدث خطأ أثناء الإرسال: " + e.message);
-        } finally {
-            setIsGeneratingId(null);
-        }
-    };
-
-    const handleAutoGenerate = async (rep: any) => {
-        if (!event.features?.design_config) return alert('هذا الحدث لا يحتوي على قالب محفوظ في الاستوديو للتوليد التلقائي');
-        setIsGeneratingId(rep.id);
-
-        try {
-            const { elements, backgroundUrl } = event.features.design_config;
-            const guest = guestsList.find(g => g.id === rep.replacement_guest_id);
-            if (!guest) throw new Error("لم يتم العثور على بيانات الضيف");
-
-            const canvas = document.createElement('canvas');
-            canvas.width = 1080; // Standard size, can be adjusted based on event features if needed
-            canvas.height = 1920;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error("Canvas error");
-
-            if (backgroundUrl) {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.src = backgroundUrl;
-                await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
-                ctx.drawImage(img, 0, 0, 1080, 1920);
-            } else {
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, 1080, 1920);
-            }
-
-            for (const el of elements) {
-                if (el.type === 'text') {
-                    let text = el.text || '';
-                    text = text.replace('{name}', guest.name)
-                        .replace('{table}', guest.table_no || '')
-                        .replace('{category}', guest.category || '')
-                        .replace('{companions}', (guest.companions_count_invited || 0).toString())
-                        .replace('{companions_count}', (guest.companions_count_invited || 0).toString())
-                        .replace('{serial}', (guest.serial || 0).toString());
-
-                    if (el.prefix) text = el.prefix + " " + text;
-                    if (el.suffix) text = text + " " + el.suffix;
-
-                    ctx.font = `${el.fontWeight || 'normal'} ${el.fontSize}px ${el.fontFamily || 'Arial'}`;
-                    ctx.fillStyle = el.color || '#000';
-                    ctx.textAlign = el.align || 'left';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(text, el.x, el.y);
-                } else if (el.type === 'qr') {
-                    const size = el.size || 200;
-                    const defaultUrl = 'https://lonyinvit.netlify.app/check-in.html?token={token}';
-                    const baseUrl = el.qrUrl && el.qrUrl.trim() ? el.qrUrl : defaultUrl;
-                    const qrContent = baseUrl.replace('{token}', guest.qr_token || guest.id);
-
-                    const qrData = await QRCode.toDataURL(qrContent, {
-                        margin: 1,
-                        width: size,
-                        errorCorrectionLevel: el.qrCenterImage ? 'H' : 'M',
-                        color: { dark: el.colorDark || '#000000', light: el.colorLight || '#00000000' }
-                    });
-
-                    const qrImg = new Image();
-                    qrImg.crossOrigin = 'anonymous';
-                    qrImg.src = qrData;
-                    await new Promise(r => qrImg.onload = r);
-                    ctx.drawImage(qrImg, el.x - size / 2, el.y - size / 2, size, size);
-                }
-            }
-
-            await new Promise((resolve, reject) => {
-                canvas.toBlob(async (blob) => {
-                    if (!blob) return reject(new Error("Failed to create blob"));
-                    const fileName = `${event.id}/${guest.qr_token}_rep.png`;
-
-                    const { error } = await supabase.storage.from('invitations').upload(fileName, blob, {
-                        upsert: true,
-                        contentType: 'image/png'
-                    });
-
-                    if (error) return reject(error);
-
-                    const { data: { publicUrl } } = supabase.storage.from('invitations').getPublicUrl(fileName);
-                    await supabase.from('guests').update({ card_image_url: publicUrl }).eq('id', guest.id);
-                    await sendReplacementCard(rep.id, guest.id, publicUrl);
-                    resolve(true);
-                }, 'image/png');
-            });
-
-        } catch (e: any) {
-            console.error(e);
-            alert("خطأ في التوليد الآلي: " + e.message);
-            setIsGeneratingId(null);
-        }
-    };
-
-    const handleManualUpload = async (rep: any, e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setIsGeneratingId(rep.id);
-        try {
-            const guest = guestsList.find(g => g.id === rep.replacement_guest_id);
-            if (!guest) throw new Error("لم يتم العثور على بيانات الضيف");
-
-            const fileName = `${event.id}/${guest.qr_token}_manual_rep.png`;
-            const { error: uploadError } = await supabase.storage.from('invitations').upload(fileName, file, {
-                upsert: true,
-                contentType: file.type
-            });
-
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage.from('invitations').getPublicUrl(fileName);
-            await supabase.from('guests').update({ card_image_url: publicUrl }).eq('id', guest.id);
-            await sendReplacementCard(rep.id, guest.id, publicUrl);
-        } catch (error: any) {
-            console.error("Upload Error:", error);
-            alert("فشل في رفع الصورة: " + error.message);
-            setIsGeneratingId(null);
-        }
-    };
+    // UI Content
+    const pieData = stats ? [
+        { name: 'مؤكد', value: stats.confirmed, color: '#10B981' },
+        { name: 'معتذر', value: stats.declined, color: '#EF4444' },
+        { name: 'بانتظار رد', value: stats.pending, color: LONY_GOLD },
+    ] : [];
 
     if (loading) return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-            <Loader2 className="animate-spin text-lony-gold w-10 h-10" />
+        <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center p-6">
+            <Loader2 className="animate-spin text-[#C5A059] w-12 h-12 mb-4" />
+            <p className="text-[#2F3645] font-bold animate-pulse">جاري تحديث بيانات مناسبتكم...</p>
         </div>
     );
 
     if (!event) return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">
-            <Card className="max-w-md">
-                <CardContent className="p-8 text-center">
-                    <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">رابط غير صالح</h2>
-                    <p className="text-gray-600 mb-6">
-                        هذا الرابط غير صحيح أو تم حذفه.
-                    </p>
+        <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4" dir="rtl">
+            <Card className="max-w-md border-red-100 shadow-2xl">
+                <CardContent className="p-8 text-center font-kufi">
+                    <XCircle className="w-20 h-20 text-red-500 mx-auto mb-4" />
+                    <h2 className="text-2xl font-black text-gray-800 mb-2">رابط غير صالح</h2>
+                    <p className="text-gray-500 mb-6">عذراً، الرابط الذي تحاول الوصول إليه غير متاح أو منتهي الصلاحية.</p>
                 </CardContent>
             </Card>
         </div>
     );
 
     if (isExpired) return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">
-            <Card className="max-w-md shadow-2xl border-t-4 border-lony-navy">
-                <CardContent className="p-8 text-center">
-                    <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">انتهت المناسبة السعيدة</h2>
-                    <p className="text-gray-600 mb-6 font-medium">
+        <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4" dir="rtl">
+            <Card className="max-w-md shadow-2xl border-t-8 border-[#2F3645] rounded-3xl overflow-hidden font-kufi">
+                <CardContent className="p-10 text-center">
+                    <Lock className="w-20 h-20 text-[#C5A059] mx-auto mb-6" />
+                    <h2 className="text-3xl font-black text-[#2F3645] mb-4">انتهت المناسبة السعيدة</h2>
+                    <p className="text-gray-600 mb-8 leading-relaxed">
                         تم أرشفة البيانات بنجاح بحمد الله.<br />
-                        لتحقيق أعلى معايير الخصوصية والأمان لضيوفكم، تم إغلاق لوحة التحكم هذه.
+                        لتحقيق أعلى معايير الخصوصية لضيوفكم، تم إغلاق بوابة المتابعة بعد انتهاء الحدث بـ 48 ساعة.
                     </p>
-                    <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4 text-center">
-                        <p className="text-sm text-blue-800 font-bold">
-                            شكراً لاختياركم لوني (Lony Invitations) لمناسبتكم.
-                        </p>
+                    <div className="bg-[#FFF8E7] rounded-2xl p-6 border border-[#C5A059]/20">
+                        <p className="text-[#C5A059] font-black italic">نأمل أننا ساهمنا في تجميل مناسبتكم.</p>
+                        <p className="text-xs text-[#2F3645]/60 mt-2">فريق لوني للدعوات</p>
                     </div>
                 </CardContent>
             </Card>
         </div>
     );
 
-    const attendancePercentage = totalGuests > 0 ? Math.round((attendedGuests / totalGuests) * 100) : 0;
-    const confirmationPercentage = totalGuests > 0 ? Math.round((confirmedGuests / totalGuests) * 100) : 0;
-
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col font-kufi" dir="rtl">
-            {/* Header */}
-            <div className="bg-lony-navy text-white p-6 rounded-b-[2rem] shadow-xl">
-                <div className="flex items-center gap-3 mb-2 opacity-80">
-                    <Activity className="w-5 h-5" />
-                    <span className="text-xs uppercase tracking-widest">Host Portal</span>
-                </div>
-                <h1 className="text-2xl font-bold font-amiri tracking-wide truncate">{event.name}</h1>
-                <p className="text-white/60 text-sm mt-1">تحديث للبيانات كل 30 ثانية</p>
-            </div>
-
-            {/* Tabs Navigation */}
-            <div className="px-6 -mt-6">
-                <div className="bg-white rounded-xl shadow-sm p-1 flex justify-between overflow-x-auto snap-x hide-scrollbar">
-                    <button
-                        onClick={() => setActiveTab('overview')}
-                        className={`flex-none w-1/3 min-w-[100px] snap-center py-3 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-lony-gold text-lony-navy shadow-inner' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        الإحصائيات
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('guests')}
-                        className={`flex-none w-1/3 min-w-[100px] snap-center py-3 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'guests' ? 'bg-lony-gold text-lony-navy shadow-inner' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        الضيوف ({totalGuests})
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('replacements')}
-                        className={`flex-none w-1/3 min-w-[100px] snap-center py-3 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'replacements' ? 'bg-lony-gold text-lony-navy shadow-inner' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        الاستبدال {declinedGuests > 0 ? `(${declinedGuests})` : ''}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('info')}
-                        className={`flex-none w-1/3 min-w-[100px] snap-center py-3 px-1 text-xs sm:text-sm font-bold rounded-lg transition-colors ${activeTab === 'info' ? 'bg-lony-gold text-lony-navy shadow-inner' : 'text-gray-500 hover:bg-gray-50'}`}
-                    >
-                        المناسبة
-                    </button>
-                </div>
-            </div>
-
-            <div className="p-6 space-y-4 pb-20">
-                {/* Tab: Overview */}
-                {activeTab === 'overview' && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        {/* Main Stats Card */}
-                        <Card className="border-none shadow-lg overflow-hidden relative">
-                            <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-lony-gold via-yellow-300 to-lony-gold"></div>
-                            <CardContent className="p-6 text-center pt-8">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex flex-col items-center">
-                                        <div className="w-24 h-24 rounded-full border-4 border-lony-navy/10 flex flex-col items-center justify-center relative bg-gray-50 mb-2">
-                                            <span className="text-2xl font-bold text-lony-navy">{attendancePercentage}%</span>
-                                        </div>
-                                        <span className="text-sm font-bold text-gray-700">نسبة الحضور</span>
-                                        <span className="text-xs text-gray-500 mt-1">{attendedGuests} زائر في القاعة</span>
-                                    </div>
-                                    <div className="flex flex-col items-center">
-                                        <div className="w-24 h-24 rounded-full border-4 border-green-500/10 flex flex-col items-center justify-center relative bg-green-50 mb-2">
-                                            <span className="text-2xl font-bold text-green-700">{confirmationPercentage}%</span>
-                                        </div>
-                                        <span className="text-sm font-bold text-gray-700">تأكيد الحضور (RSVP)</span>
-                                        <span className="text-xs text-gray-500 mt-1">{confirmedGuests} مؤكد</span>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <Card className="bg-white border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-28">
-                                    <span className="text-2xl font-bold text-gray-800 mb-1">{totalGuests}</span>
-                                    <span className="text-sm font-medium text-gray-500 text-center">عائلة/دعوة</span>
-                                </CardContent>
-                            </Card>
-                            <Card className="bg-white border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-28">
-                                    <span className="text-2xl font-bold text-gray-800 mb-1">{totalIndividuals}</span>
-                                    <span className="text-sm font-medium text-gray-500 text-center">إجمالي الأشخاص المتوقعين</span>
-                                </CardContent>
-                            </Card>
+        <div className="min-h-screen bg-[#FDFBF7] flex flex-col font-kufi text-[#2F3645]" dir="rtl">
+            {/* Header: Luxury Premium Look */}
+            <div className="bg-[#2F3645] text-white pt-12 pb-20 px-6 rounded-b-[3rem] shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-[#C5A059]/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+                <div className="absolute bottom-0 left-0 w-48 h-48 bg-[#C5A059]/5 rounded-full -ml-24 -mb-24 blur-2xl"></div>
+                
+                <div className="relative z-10 max-w-lg mx-auto">
+                    <div className="flex items-center justify-between mb-4">
+                        <img src="/logo-white.png" className="h-8 opacity-90" alt="Lony" />
+                        <div className="flex items-center gap-1.5 bg-[#C5A059] px-3 py-1 rounded-full text-[10px] font-black text-[#2F3645] uppercase tracking-tighter">
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                            </span>
+                            Live Portal
                         </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <Card className="bg-blue-50/50 border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-28">
-                                    <span className="text-2xl font-bold text-blue-700 mb-1">{attendedIndividuals}</span>
-                                    <span className="text-sm font-medium text-blue-800 text-center">عدد الداخلين (أفراد)</span>
-                                </CardContent>
-                            </Card>
-                            <Card className="bg-red-50/50 border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-28">
-                                    <span className="text-2xl font-bold text-red-600 mb-1">{declinedGuests}</span>
-                                    <span className="text-sm font-medium text-red-800 text-center">الاعتذارات (دعوات)</span>
-                                </CardContent>
-                            </Card>
-                        </div>
-
-                        {/* WhatsApp Engagement Card */}
-                        <Card className="border-none shadow-md bg-gradient-to-br from-indigo-600 to-slate-900 text-white overflow-hidden relative">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl"></div>
-                            <CardContent className="p-5">
-                                <div className="flex justify-between items-center mb-4">
-                                    <div className="flex items-center gap-2">
-                                        <div className="p-2 bg-white/10 rounded-lg"><Activity className="w-4 h-4 text-indigo-300" /></div>
-                                        <h4 className="text-xs font-black uppercase tracking-widest opacity-80">تفاعل الواتساب</h4>
-                                    </div>
-                                    <span className="text-[10px] font-bold bg-indigo-500/30 px-2 py-1 rounded-full border border-indigo-400/20">LIVE DATA</span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-center">
-                                    <div className="flex flex-col">
-                                        <span className="text-xl font-black">{waStats.sent}</span>
-                                        <span className="text-[9px] opacity-60">تم الإرسال</span>
-                                    </div>
-                                    <div className="flex flex-col border-x border-white/10">
-                                        <span className="text-xl font-black text-emerald-400">{waStats.delivered}</span>
-                                        <span className="text-[9px] opacity-60">وصلت</span>
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-xl font-black text-blue-400">{waStats.read}</span>
-                                        <span className="text-[9px] opacity-60">قُرأت</span>
-                                    </div>
-                                </div>
-                                <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
-                                    <span className="text-[10px] font-bold opacity-60">نسبة فتح الرسائل (Open Rate)</span>
-                                    <span className="text-sm font-black text-indigo-300">{waStats.sent > 0 ? Math.round((waStats.read / waStats.sent) * 100) : 0}%</span>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* RSVP Progress Bar */}
-                        <Card className="border-none shadow-md">
-                            <CardContent className="p-4">
-                                <p className="text-sm font-bold text-gray-700 mb-2">نسبة الاستجابة</p>
-                                <div className="w-full h-5 bg-gray-200 rounded-full overflow-hidden flex">
-                                    <div className="bg-green-500 h-full transition-all" style={{ width: `${confirmationPercentage}%` }}></div>
-                                    <div className="bg-red-400 h-full transition-all" style={{ width: `${totalGuests > 0 ? Math.round((declinedGuests / totalGuests) * 100) : 0}%` }}></div>
-                                    <div className="bg-amber-400 h-full transition-all" style={{ width: `${totalGuests > 0 ? Math.round((pendingGuests / totalGuests) * 100) : 0}%` }}></div>
-                                </div>
-                                <div className="flex justify-between mt-1 text-[10px] text-gray-500">
-                                    <span>🟢 مؤكد {confirmationPercentage}%</span>
-                                    <span>🔴 معتذر {totalGuests > 0 ? Math.round((declinedGuests / totalGuests) * 100) : 0}%</span>
-                                    <span>🟡 بانتظار {totalGuests > 0 ? Math.round((pendingGuests / totalGuests) * 100) : 0}%</span>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* Replacements */}
-                        {replacements.length > 0 && (
-                            <Card className="border-none shadow-md bg-purple-50/50">
-                                <CardContent className="p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <ArrowLeftRight className="w-4 h-4 text-purple-600" />
-                                        <p className="text-sm font-bold text-purple-800">البدلاء ({replacements.length})</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {replacements.map((r: any) => (
-                                            <div key={r.id} className="bg-white rounded-lg p-2 flex items-center justify-between text-sm">
-                                                <div>
-                                                    <span className="text-red-500 line-through text-xs">{r.original_guest_name}</span>
-                                                    <span className="mx-1">→</span>
-                                                    <span className="text-green-700 font-medium text-xs">{r.replacement_guest_name}</span>
-                                                </div>
-                                                {r.card_sent && <span className="text-[10px] text-green-600">✅ أُرسل</span>}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
                     </div>
-                )}
+                    <h1 className="text-3xl font-black font-amiri tracking-tight mb-2 drop-shadow-lg">{event.name}</h1>
+                    <div className="flex items-center gap-4 text-white/60 text-xs">
+                        <div className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {event.date}</div>
+                        <div className="flex items-center gap-1"><Timer className="w-3.5 h-3.5" /> تحديث: {lastUpdated.toLocaleTimeString('ar-SA')}</div>
+                    </div>
+                </div>
+            </div>
 
-                {/* Tab: Guests */}
-                {activeTab === 'guests' && (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-800 mb-4 border border-blue-100 flex items-start gap-3">
-                            <Users className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                            <p>تُعرض هنا قائمة ضيوفك لتعرف حالة تأكيدهم وردودهم. (يتم تحديث الردود آلياً عند رد الضيف على الواتساب).</p>
+            {/* Navigation Drawer Style */}
+            <div className="px-4 -mt-10 max-w-lg mx-auto w-full mb-6">
+                <div className="bg-white/80 backdrop-blur-xl border border-white/50 rounded-3xl shadow-xl p-1.5 flex justify-between">
+                    {[
+                        { id: 'overview', label: 'النبض الحي', icon: LayoutDashboard },
+                        { id: 'guests', label: 'الضيوف', icon: Users },
+                        { id: 'replacements', label: 'البدلاء', icon: ArrowLeftRight },
+                        { id: 'info', label: 'التفاصيل', icon: MapPin }
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as any)}
+                            className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-[1.25rem] transition-all duration-500 relative flex-1 ${
+                                activeTab === tab.id 
+                                ? 'bg-[#2F3645] text-[#C5A059] shadow-lg scale-[1.05]' 
+                                : 'text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            <tab.icon className={`w-5 h-5 mb-1 ${activeTab === tab.id ? 'animate-bounce' : ''}`} />
+                            <span className="text-[10px] font-black">{tab.label}</span>
+                            {tab.id === 'guests' && guestsList.length > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-[#C5A059] text-[#2F3645] text-[8px] font-black h-4 w-4 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                                    {guestsList.length}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="flex-1 max-w-lg mx-auto w-full px-6 space-y-6 pb-24">
+                
+                {/* 1. Overview Tab */}
+                {activeTab === 'overview' && stats && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5 duration-700">
+                        {/* Hero Stats Card */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
+                                <div className="text-3xl font-black text-[#2F3645] mb-1">{stats.attendedPeople}</div>
+                                <div className="text-[10px] font-bold text-gray-400 mb-2">دخلوا القاعة</div>
+                                <div className="w-full h-1.5 bg-gray-50 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-emerald-500 transition-all duration-1000" 
+                                        style={{ width: `${(stats.attendedPeople / (stats.totalPeople || 1)) * 100}%` }}
+                                    ></div>
+                                </div>
+                                <div className="text-[9px] text-[#2F3645]/60 mt-2 font-black">إجمالي: {stats.totalPeople} فرد</div>
+                            </div>
+                            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
+                                <div className="text-3xl font-black text-[#10B981] mb-1">{stats.confirmed}</div>
+                                <div className="text-[10px] font-bold text-gray-400 mb-2">تأكيد RSVP</div>
+                                <div className="w-full h-1.5 bg-gray-50 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-[#10B981] transition-all duration-1000" 
+                                        style={{ width: `${(stats.confirmed / (stats.total || 1)) * 100}%` }}
+                                    ></div>
+                                </div>
+                                <div className="text-[9px] text-[#2F3645]/60 mt-2 font-black">من أصل: {stats.total} عائلة</div>
+                            </div>
                         </div>
 
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                            {guestsList.length === 0 ? (
-                                <div className="p-8 text-center text-gray-500">لم يتم إضافة ضيوف بعد.</div>
-                            ) : (
-                                <div className="divide-y divide-gray-100">
-                                    {guestsList.map(guest => (
-                                        <div key={guest.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                                            <div>
-                                                <p className="font-bold text-gray-800">{guest.name}</p>
-                                                <p className="text-xs text-gray-500 mt-1">{guest.phone || 'بدون رقم'}</p>
-                                            </div>
-                                            <div className="text-left flex flex-col items-end gap-1">
-                                                {/* Attendance Status */}
-                                                {guest.status === 'attended' ? (
-                                                    <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold inline-flex items-center gap-1">
-                                                        <CheckCircle className="w-3 h-3" /> تم الدخول
-                                                    </span>
-                                                ) : (
-                                                    <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">لم يحضر بعد</span>
-                                                )}
-
-                                                {/* WhatsApp Status Mini-Icon */}
-                                                <div className="flex items-center gap-2 mt-1">
-                                                    {guest.last_wa_status === 'read' ? (
-                                                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">
-                                                            <Eye className="w-2.5 h-2.5" /> تمت القراءة
-                                                        </div>
-                                                    ) : guest.last_wa_status === 'delivered' ? (
-                                                        <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-                                                            <MailCheck className="w-2.5 h-2.5" /> استلمها الضيف
-                                                        </div>
-                                                    ) : null}
-                                                    
-                                                    {guest.rsvp_status === 'confirmed' && (
-                                                        <span className="text-blue-600 text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded">مؤكد حضوره</span>
-                                                    )}
-                                                    {guest.rsvp_status === 'declined' && (
-                                                        <span className="text-red-500 text-[10px] font-bold bg-red-50 px-1.5 py-0.5 rounded">معتذر</span>
-                                                    )}
-                                                </div>
-                                            </div>
+                        {/* Interactive Chart Section */}
+                        <Card className="rounded-[2.5rem] border-none shadow-xl overflow-hidden bg-white">
+                            <CardHeader className="pb-0 pt-8 text-center">
+                                <CardTitle className="text-sm font-black text-gray-500 uppercase tracking-widest flex items-center justify-center gap-2">
+                                    <Activity className="w-4 h-4 text-[#C5A059]" /> تحليل استجابة الضيوف
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 flex flex-col items-center">
+                                <div className="h-60 w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie
+                                                data={pieData}
+                                                innerRadius={65}
+                                                outerRadius={85}
+                                                paddingAngle={8}
+                                                dataKey="value"
+                                                animationDuration={1500}
+                                            >
+                                                {pieData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                                                ))}
+                                            </Pie>
+                                            <RechartsTooltip 
+                                                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontFamily: 'Noto Kufi Arabic' }} 
+                                            />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="grid grid-cols-3 gap-3 w-full mt-2">
+                                    {pieData.map(item => (
+                                        <div key={item.name} className="flex flex-col items-center bg-gray-50/50 p-2 rounded-2xl">
+                                            <div className="w-2.5 h-2.5 rounded-full mb-1" style={{ backgroundColor: item.color }}></div>
+                                            <span className="text-[10px] font-black text-gray-800">{item.name}</span>
+                                            <span className="text-xs font-black text-gray-400">{Math.round((item.value / stats.total) * 100)}%</span>
                                         </div>
                                     ))}
                                 </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                            </CardContent>
+                        </Card>
 
-                {/* Tab: Event Info */}
-                {activeTab === 'info' && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <Card className="border-none shadow-md">
-                            <CardContent className="p-6 space-y-6">
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
-                                        <Calendar className="w-6 h-6 text-blue-600" />
+                        {/* WhatsApp Forensic Data */}
+                        <Card className="rounded-[2.5rem] border-none shadow-xl bg-[#2F3645] text-white overflow-hidden p-0 relative">
+                            <div className="absolute top-0 left-0 w-24 h-24 bg-blue-500/20 rounded-full -ml-12 -mt-12 blur-2xl"></div>
+                            <CardContent className="p-8">
+                                <div className="flex justify-between items-center mb-6">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-blue-500/20 rounded-xl"><Eye className="w-5 h-5 text-blue-300" /></div>
+                                        <h3 className="font-black text-sm tracking-wide">رصد تفاعل الواتساب</h3>
                                     </div>
-                                    <div>
-                                        <h3 className="text-sm text-gray-500 font-bold mb-1">تاريخ المناسبة</h3>
-                                        <p className="text-lg text-gray-800 font-medium">{event.date || 'غير محدد'}</p>
+                                    <div className="bg-[#10B981]/20 px-3 py-1 rounded-full border border-[#10B981]/30">
+                                        <span className="text-[9px] font-black text-[#10B981]">موثق من ميتا</span>
                                     </div>
                                 </div>
-
-                                <div className="h-px bg-gray-100 w-full"></div>
-
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-lony-gold/20 flex items-center justify-center flex-shrink-0">
-                                        <MapPin className="w-6 h-6 text-lony-navy" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-sm text-gray-500 font-bold mb-1">مكان المناسبة (القاعة)</h3>
-                                        <p className="text-lg text-gray-800 font-medium">{event.venue || 'غير محدد'}</p>
-                                    </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { label: 'أُرسلت', value: stats.wa.sent, color: 'text-white' },
+                                        { label: 'استُلمت', value: stats.wa.delivered, color: 'text-emerald-400' },
+                                        { label: 'قُرأت', value: stats.wa.read, color: 'text-blue-400' }
+                                    ].map(item => (
+                                        <div key={item.label} className="flex flex-col items-center border-l last:border-l-0 border-white/5 py-2">
+                                            <span className={`text-2xl font-black ${item.color}`}>{item.value}</span>
+                                            <span className="text-[9px] font-medium opacity-50 uppercase mt-1 tracking-tighter">{item.label}</span>
+                                        </div>
+                                    ))}
                                 </div>
-
-                                <div className="h-px bg-gray-100 w-full"></div>
-
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-purple-50 flex items-center justify-center flex-shrink-0">
-                                        <Clock className="w-6 h-6 text-purple-600" />
+                                <div className="mt-8 p-4 bg-white/5 rounded-2xl border border-white/5 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCheck className="w-4 h-4 text-emerald-400" />
+                                        <span className="text-[10px] font-bold opacity-80">كفاءة وصول الدعوات</span>
                                     </div>
-                                    <div>
-                                        <h3 className="text-sm text-gray-500 font-bold mb-1">وقت فتح بوابات القاعة</h3>
-                                        <p className="text-lg text-gray-800 font-medium">
-                                            {event.opening_time ? new Date(event.opening_time).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }) : 'حسب ما هو مطبوع في الدعوة'}
-                                        </p>
-                                    </div>
+                                    <span className="text-lg font-black text-emerald-400">{Math.round((stats.wa.delivered / (stats.wa.sent || 1)) * 100)}%</span>
                                 </div>
                             </CardContent>
                         </Card>
                     </div>
                 )}
 
-                {/* Tab: Replacements */}
-                {activeTab === 'replacements' && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
-                            <p className="text-sm text-purple-800 leading-relaxed font-medium">
-                                يمكنك هنا إضافة ضيوف جدد بدلاً من الضيوف الذين اعتذروا. نظام لوني سيقوم بتجهيز الدعوة للبديل وإرسالها لهم تلقائياً.
-                            </p>
+                {/* 2. Guests List Tab */}
+                {activeTab === 'guests' && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-left-5 duration-700">
+                        <div className="bg-[#FFF8E7] p-5 rounded-3xl border border-[#C5A059]/20 flex items-start gap-4">
+                            <div className="p-2 bg-white rounded-xl shadow-sm"><AlertCircle className="w-5 h-5 text-[#C5A059]" /></div>
+                            <p className="text-xs text-[#2F3645]/80 leading-relaxed font-bold">هذه القائمة مرئية لك فقط للمتابعة، يُمكنك معرفة من استلم بطاقته ومن قرأ الدعوة لحظياً.</p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <Card className="bg-white border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-24">
-                                    <span className="text-2xl font-bold text-gray-800 mb-1">{declinedGuests}</span>
-                                    <span className="text-xs font-medium text-gray-500 text-center">المقاعد المتاحة<br />(المعتذرين)</span>
-                                </CardContent>
-                            </Card>
-                            <Card className="bg-white border-none shadow-sm">
-                                <CardContent className="p-4 flex flex-col items-center justify-center h-24">
-                                    <span className="text-2xl font-bold text-purple-600 mb-1">{replacements.length}</span>
-                                    <span className="text-xs font-medium text-purple-800 text-center">البدلاء<br />المضافين</span>
-                                </CardContent>
-                            </Card>
-                        </div>
-
-                        {/* Add Replacement Form */}
-                        {replacements.length < declinedGuests ? (
-                            <Card className="border-none shadow-md overflow-hidden">
-                                <div className="bg-lony-navy text-white px-4 py-3 flex items-center gap-2">
-                                    <UserPlus className="w-4 h-4" />
-                                    <h3 className="text-sm font-bold">إضافة بديل جديد</h3>
+                        <div className="space-y-2">
+                            {guestsList.length === 0 ? (
+                                <div className="py-20 text-center">
+                                    <Users className="w-16 h-16 text-gray-200 mx-auto mb-4" />
+                                    <p className="text-gray-400 font-bold">لا يوجد ضيوف مسجلين بعد</p>
                                 </div>
-                                <CardContent className="p-4">
-                                    <form onSubmit={handleAddReplacement} className="space-y-3">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">الاسم الكريم</label>
-                                            <input
-                                                type="text"
-                                                placeholder="مثال: فهد عبدالعزيز"
-                                                className="w-full h-10 px-3 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:bg-white focus:border-lony-gold focus:ring-1 focus:ring-lony-gold outline-none transition-all"
-                                                value={repName}
-                                                onChange={e => setRepName(e.target.value)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">رقم الواتساب</label>
-                                            <input
-                                                type="tel"
-                                                placeholder="05XXXXXXXX"
-                                                className="w-full h-10 px-3 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:bg-white focus:border-lony-gold focus:ring-1 focus:ring-lony-gold outline-none transition-all text-left"
-                                                dir="ltr"
-                                                value={repPhone}
-                                                onChange={e => setRepPhone(e.target.value)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1">عدد المرافقين</label>
-                                            <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-1 w-fit">
-                                                <button type="button" onClick={() => setRepCompanions(Math.max(0, repCompanions - 1))} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100">-</button>
-                                                <span className="w-8 text-center font-bold">{repCompanions}</span>
-                                                <button type="button" onClick={() => setRepCompanions(repCompanions + 1)} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100">+</button>
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="submit"
-                                            disabled={isSubmittingRep || !repName || !repPhone}
-                                            className="w-full h-11 bg-lony-gold hover:bg-yellow-500 text-lony-navy font-bold rounded-lg mt-4 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            {isSubmittingRep ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                                            اعتماد وإرسال
-                                        </button>
-                                    </form>
-                                </CardContent>
-                            </Card>
-                        ) : (
-                            <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-center text-sm font-medium">
-                                لقد قمت بإضافة الحد الأقصى من البدلاء المتاح ({declinedGuests} بديل). لا يمكنك إضافة المزيد إلا إذا اعتذر ضيوف آخرون.
-                            </div>
-                        )}
-
-                        {/* Existing Replacements */}
-                        <div className="space-y-2 mt-6">
-                            <h3 className="text-sm font-bold text-gray-700 px-1">البدلاء ({replacements.length})</h3>
-                            {replacements.length === 0 ? (
-                                <p className="text-xs text-gray-500 text-center py-4 bg-gray-50 rounded-lg border border-dashed border-gray-200">لم تقم بإضافة أي بديل بعد</p>
                             ) : (
-                                replacements.map((rep: any) => (
-                                    <div key={rep.id} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-2">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-bold text-gray-800">{rep.replacement_guest_name}</span>
-                                                <span className="text-xs text-gray-500 font-mono mt-0.5">{rep.replacement_guest_phone}</span>
-                                            </div>
-                                            <div className="bg-green-50 text-green-700 px-2 py-1 rounded text-[10px] font-bold">
-                                                بديل
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-between text-[11px] pt-2 border-t border-gray-50 pb-2">
-                                            <span className="text-gray-500">بدلاً من: {rep.original_guest_name || 'غير محدد'}</span>
-                                            <div className="flex items-center gap-1">
-                                                {rep.card_sent ? (
-                                                    <span className="text-green-600 font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3" /> تم الإرسال</span>
-                                                ) : (
-                                                    <span className="text-amber-500 font-bold flex items-center gap-1"><Activity className="w-3 h-3" /> جاري التجهيز</span>
+                                guestsList.map(guest => (
+                                    <div key={guest.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-50 flex items-center justify-between hover:border-[#C5A059]/30 transition-all duration-300">
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="font-black text-[#2F3645]">{guest.name}</p>
+                                                {guest.status === 'attended' && (
+                                                    <span className="bg-emerald-100 text-emerald-700 text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase">وصل</span>
                                                 )}
                                             </div>
-                                        </div>
-
-                                        {/* Actions for pending replacements */}
-                                        {!rep.card_sent && (
-                                            <div className="flex items-center gap-2 pt-2 border-t border-gray-50">
-                                                {isGeneratingId === rep.id ? (
-                                                    <div className="w-full text-center py-2 text-xs text-lony-navy font-bold flex items-center justify-center gap-2">
-                                                        <Loader2 className="w-4 h-4 animate-spin" /> جاري التجهيز والإرسال...
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-2 w-full">
-                                                        {event.features?.design_config && (
-                                                            <button
-                                                                onClick={() => handleAutoGenerate(rep)}
-                                                                className="flex-1 bg-lony-navy text-white text-[11px] font-bold py-1.5 rounded flex items-center justify-center gap-1 hover:bg-opacity-90 transition-all cursor-pointer"
-                                                            >
-                                                                <ImageIcon className="w-3 h-3 flex-shrink-0" /> تفعيل النماذج
-                                                            </button>
-                                                        )}
-                                                        <div className="flex-1 relative cursor-pointer">
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                onChange={(e) => handleManualUpload(rep, e)}
-                                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                            />
-                                                            <div className="w-full bg-gray-100 text-gray-700 text-[11px] font-bold py-1.5 rounded flex items-center justify-center gap-1 hover:bg-gray-200 transition-all">
-                                                                <UploadCloud className="w-3 h-3 flex-shrink-0" /> رفع بطاقة جاهزة
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
+                                            <div className="flex items-center gap-3">
+                                                <p className="text-[10px] font-bold text-gray-400" dir="ltr">{guest.phone?.replace(/(\d{3})(\d{3})(\d{4})/, '$1-***-****') || '05XXXXXXXX'}</p>
+                                                {guest.category && <span className="text-[9px] bg-gray-100 px-2 py-0.5 rounded-full font-black text-gray-500">{guest.category}</span>}
                                             </div>
-                                        )}
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1.5 min-w-[100px]">
+                                            {/* WhatsApp Status Indicators */}
+                                            {guest.last_wa_status === 'read' ? (
+                                                <div className="flex items-center gap-1 text-[9px] font-black text-blue-500 bg-blue-50 px-2 py-1 rounded-full border border-blue-100">
+                                                    <Eye className="w-3 h-3" /> قُرأت
+                                                </div>
+                                            ) : guest.last_wa_status === 'delivered' ? (
+                                                <div className="flex items-center gap-1 text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100">
+                                                    <CheckCheck className="w-3 h-3" /> استُلمت
+                                                </div>
+                                            ) : (
+                                                <div className="text-[8px] text-gray-300 font-bold">بانتظار الإرسال</div>
+                                            )}
+                                            
+                                            {/* RSVP Status */}
+                                            {guest.rsvp_status === 'confirmed' ? (
+                                                <span className="text-emerald-500 text-[9px] font-black flex items-center gap-1"><CheckCircle className="w-3 h-3" /> أكد الحضور</span>
+                                            ) : guest.rsvp_status === 'declined' ? (
+                                                <span className="text-red-400 text-[9px] font-black flex items-center gap-1"><AlertCircle className="w-3 h-3" /> اعتذر</span>
+                                            ) : null}
+                                        </div>
                                     </div>
                                 ))
                             )}
@@ -769,9 +399,153 @@ const ClientDashboard: React.FC = () => {
                     </div>
                 )}
 
-                <div className="text-center mt-8 pb-4 opacity-50">
-                    <img src="/logo.png" className="h-6 mx-auto mb-2 grayscale opacity-50" alt="Lony" />
-                    <p className="text-xs text-gray-400">Powered by Lony Invitations System</p>
+                {/* 3. Replacements Tab */}
+                {activeTab === 'replacements' && stats && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-5 duration-700">
+                        <div className="bg-[#2F3645] p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+                            <ArrowLeftRight className="absolute top-6 left-6 text-white/5 w-24 h-24 rotate-12" />
+                            <h3 className="text-xl font-black mb-2 flex items-center gap-2">
+                                <UserCheck className="w-6 h-6 text-[#C5A059]" /> نظام الاستبدال الذكي
+                            </h3>
+                            <p className="text-white/70 text-xs leading-relaxed font-bold">
+                                نوفر لك مرونة عالية؛ استغل المقاعد الشاغرة (المعتذرين) وأضف بدلاء بضغطة زر. النظام سيتولى توليد وإرسال الدعوة آلياً.
+                            </p>
+                            
+                            <div className="grid grid-cols-2 gap-4 mt-8">
+                                <div className="bg-white/5 rounded-3xl p-5 border border-white/10 text-center">
+                                    <span className="block text-3xl font-black text-[#EF4444] mb-1">{stats.declined}</span>
+                                    <span className="text-[9px] font-black opacity-50">مقعد متاح</span>
+                                </div>
+                                <div className="bg-[#C5A059] rounded-3xl p-5 text-[#2F3645] text-center">
+                                    <span className="block text-3xl font-black mb-1">{replacements.length}</span>
+                                    <span className="text-[9px] font-black opacity-80">تم استغلالها</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Replacement Form */}
+                        {replacements.length < stats.declined ? (
+                            <div className="bg-white rounded-[2.5rem] shadow-xl p-8 border border-gray-50">
+                                <h3 className="text-lg font-black text-[#2F3645] mb-6 flex items-center gap-3">
+                                    <UserPlus className="w-6 h-6 text-[#C5A059]" /> إضافة ضيف بديل
+                                </h3>
+                                <form  className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mr-2">الاسم الثلاثي</label>
+                                        <input
+                                            type="text"
+                                            placeholder="اكتب اسم الضيف هنا..."
+                                            className="w-full h-14 px-6 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#C5A059] outline-none transition-all"
+                                            value={repName}
+                                            onChange={e => setRepName(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mr-2">جوال الواتساب</label>
+                                        <input
+                                            type="tel"
+                                            placeholder="05XXXXXXXX"
+                                            className="w-full h-14 px-6 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-[#C5A059] outline-none transition-all text-left"
+                                            dir="ltr"
+                                            value={repPhone}
+                                            onChange={e => setRepPhone(e.target.value)}
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            if (!repName || !repPhone) return alert('أدخل البيانات');
+                                            setIsSubmittingRep(true);
+                                            // Handle Replacement API Call
+                                            try {
+                                                const res = await fetch(`${config.api.whatsapp}/add-replacement`, {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ event_id: event.id, name: repName, phone: repPhone, companions_count: repCompanions })
+                                                });
+                                                if (res.ok) {
+                                                    alert('تمت إضافة البديل بنجاح!');
+                                                    setRepName(''); setRepPhone(''); fetchData();
+                                                }
+                                            } finally { setIsSubmittingRep(false); }
+                                        }}
+                                        disabled={isSubmittingRep || !repName || !repPhone}
+                                        className="w-full h-14 bg-[#C5A059] text-[#2F3645] font-black rounded-2xl shadow-lg shadow-[#C5A059]/30 hover:shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-4"
+                                    >
+                                        {isSubmittingRep ? <Loader2 className="animate-spin w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                                        تفعيل الدعوة فوراً
+                                    </button>
+                                </form>
+                            </div>
+                        ) : (
+                            <div className="bg-amber-50 border-2 border-dashed border-amber-200 p-8 rounded-[2.5rem] text-center">
+                                <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+                                <p className="text-sm font-black text-amber-900 mb-1">اكتمل النصاب المسموح</p>
+                                <p className="text-[10px] text-amber-600 font-bold leading-relaxed">يمكنك إضافة بدلاء الجدد فقط في حال وجود اعتذارات إضافية من الضيوف الأساسيين.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* 4. Event Info Tab */}
+                {activeTab === 'info' && (
+                    <div className="space-y-4 animate-in fade-in zoom-in duration-700">
+                        <Card className="rounded-[2.5rem] border-none shadow-xl bg-white overflow-hidden p-0">
+                            <div className="h-40 bg-gray-100 relative group cursor-pointer overflow-hidden">
+                                {event.features?.map_preview_url ? (
+                                    <img src={event.features.map_preview_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt="Venue" />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
+                                        <MapPin className="w-12 h-12 text-gray-300" />
+                                    </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="bg-white text-[#2F3645] px-6 py-2 rounded-full font-black text-xs shadow-2xl">فتح الموقع في قوقل ماب</div>
+                                </div>
+                            </div>
+                            <CardContent className="p-8 space-y-8">
+                                <div className="flex items-start gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-[#FFF8E7] flex items-center justify-center flex-shrink-0">
+                                        <Calendar className="w-6 h-6 text-[#C5A059]" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">تاريخ اليوم السعيد</h4>
+                                        <p className="text-lg font-black text-[#2F3645]">{event.date || 'سيُحدد قريباً'}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+                                        <MapPin className="w-6 h-6 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">موقع القاعة</h4>
+                                        <p className="text-lg font-black text-[#2F3645]">{event.venue || 'الرياض، المملكة العربية السعودية'}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-purple-50 flex items-center justify-center flex-shrink-0">
+                                        <Clock className="w-6 h-6 text-purple-600" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">وقت استقبال الضيوف</h4>
+                                        <p className="text-lg font-black text-[#2F3645]">{event.opening_time ? new Date(event.opening_time).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }) : 'حسب وقت الدعوة'}</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        
+                        <div className="text-center py-10 opacity-30 grayscale hover:grayscale-0 transition-all duration-700">
+                             <img src="/logo.png" className="h-8 mx-auto" alt="Lony" />
+                             <p className="text-[9px] font-black mt-4 uppercase tracking-[0.2em]">{config.app.name} System • Pro Edition</p>
+                        </div>
+                    </div>
+                )}
+            </div>
+            
+            {/* Sticky Bottom Badge */}
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+                <div className="bg-[#2F3645]/90 backdrop-blur-md text-[#C5A059] px-6 py-2 rounded-full border border-white/10 shadow-2xl flex items-center gap-2 text-[10px] font-black">
+                    <CheckCheck className="w-3.5 h-3.5" /> مؤمن بواسطة نظام لوني الموحد
                 </div>
             </div>
         </div>

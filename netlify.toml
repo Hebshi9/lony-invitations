@@ -9,6 +9,19 @@
 [functions]
   directory = "netlify/functions"
 
+# Proxy to Contabo VPS (to avoid HTTPS mixed content blocks on browser)
+[[redirects]]
+  from = "/api/vps/*"
+  to = "http://62.171.172.76:3001/api/:splat"
+  status = 200
+  force = true
+
+# Route API calls to Netlify Functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
 # Static Files
 [[redirects]]
   from = "/check-in.html"

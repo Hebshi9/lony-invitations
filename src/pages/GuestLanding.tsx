@@ -139,9 +139,23 @@ export default function GuestLanding() {
 
             if (updateError) throw updateError;
 
-            // Success - refresh local stated
+            // Success - refresh local states
             setGuest({ ...guest, name: regName, companions_count: regCompanions });
             setIsRegistered(true);
+
+            // Trigger WhatsApp QR card delivery automatically
+            try {
+                fetch('/api/send-campaign-background', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        guestIds: [guest.id],
+                        eventId: event.id,
+                        campaignType: 'qr_code'
+                    })
+                }).catch(e => console.error("Auto WhatsApp Error:", e));
+            } catch (e) {}
+
         } catch (err: any) {
             alert('حدث خطأ أثناء التسجيل: ' + err.message);
         } finally {

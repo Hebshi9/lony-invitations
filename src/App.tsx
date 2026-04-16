@@ -40,7 +40,7 @@ const AppContent: React.FC = () => {
     const { user, loading, signOut } = useAuth();
 
     // Only essential guest-facing routes are public
-    const publicRoutes = ['/v/', '/s/', '/invite/'];
+    const publicRoutes = ['/v/', '/s/', '/invite/', '/host/', '/client-dashboard/', '/client/dashboard/'];
     const isPublic = publicRoutes.some(path => location.pathname.startsWith(path));
 
     // Show loading spinner while checking auth
@@ -71,6 +71,7 @@ const AppContent: React.FC = () => {
                 <Route path="/intake" element={<ClientIntake />} />
                 <Route path="/demo" element={<DemoExperience />} />
                 <Route path="/client-dashboard/:orderId" element={<ClientDashboard />} />
+                <Route path="/client/dashboard/:orderId" element={<ClientDashboard />} />
             </Routes>
         );
     }

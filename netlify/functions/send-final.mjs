@@ -1,7 +1,5 @@
 
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
     const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
     const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
     const SUPABASE_URL = process.env.VITE_SUPABASE_URL;

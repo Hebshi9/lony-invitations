@@ -61,8 +61,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 p-8 overflow-y-auto bg-lony-sand">
-                <div className="max-w-6xl mx-auto">
+            <main className={cn(
+                "flex-1 overflow-y-auto bg-lony-sand",
+                location.pathname === '/whatsapp-sender' ? "p-0" : "p-8"
+            )}>
+                <div className={cn(
+                    location.pathname === '/whatsapp-sender' ? "w-full" : "max-w-6xl mx-auto"
+                )}>
                     {children}
                 </div>
             </main>

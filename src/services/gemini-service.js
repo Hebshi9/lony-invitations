@@ -252,6 +252,60 @@ class GeminiService {
     }
 
     /**
+     * Extract Invitation Data (OCR)
+     * Parses invitation images to extract groom, bride, date, and location
+     */
+    async extractInvitationData(imageBase64) {
+        try {
+            const prompt = `
+أنت خبير محترف في تحليل بطاقات الدعوة العربية (Wedding Invitations OCR).
+حلل هذه الصورة واستخرج البيانات التالية بدقة شديدة:
+1. groom: اسم العريس (أهم اسم في البطاقة، ابحث عن "الابن" أو "نجل" أو الاسم المكتوب بخط عريض وواضح). تجنب أسماء الآباء التي تأتي في البداية.
+2. bride: اسم العروس (ابحث عن كلمة "كريمة" أو "الآنسة" أو الاسم الموازي للعريس).
+3. date: تاريخ المناسبة كما هو مكتوب (مثال: الخميس 25 رجب، أو 2024/05/10).
+4. location: مكان الحفل أو القاعة (اسم القاعة أو الفندق حصراً، مثل: "قاعة ليلتي" أو "فندق الريتز").
+
+التعليمات الصارمة:
+- استخرج النصوص باللغة العربية كما هي مكتوبة في الصورة.
+- لا تضع أي ألقاب مثل "الدكتور" أو "المهندس" إلا إذا كانت جزءاً أساسياً من الاسم المذكور.
+- **تنبيه:** في البطاقات العربية، الأسماء في البداية تكون عادةً للداعين (الآباء)، العريس والعروس أسماؤهم تكون في المنتصف وبخط أوضح.
+- **هام جداً:** لا تخترع بيانات (No Hallucinations). إذا لم تجد الحقل، اتركه فارغاً "".
+- لا تضع أسماء "ديمو" أو "عينة".
+
+الرد يجب أن يكون JSON فقط:
+{
+  "groom": "",
+  "bride": "",
+  "date": "",
+  "location": ""
+}
+            `;
+
+            const result = await this.model.generateContent([
+                prompt,
+                {
+                    inlineData: {
+                        data: imageBase64,
+                        mimeType: 'image/jpeg'
+                    }
+                }
+            ]);
+
+            const text = result.response.text();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
+            }
+
+            return { groom: '', bride: '', date: '', location: '' };
+        } catch (error) {
+            console.error('[Gemini] OCR Extraction failed:', error);
+            return { groom: '', bride: '', date: '', location: '' };
+        }
+    }
+
+    /**
      * Check if API key is configured
      */
     isConfigured() {

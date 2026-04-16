@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Users, Send, CheckCircle, Scan, RefreshCw, Download, MessageCircle, Lock } from 'lucide-react';
+import { Users, Send, CheckCircle, Scan, RefreshCw, Download, MessageCircle, Lock, Eye } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
 import { hasFeature, EventFeatures } from '../lib/features';
@@ -64,6 +64,7 @@ const AnalyticsDashboard: React.FC = () => {
                 .select('status, guest_id')
                 .in('guest_id', guests?.map(g => g.id) || []);
 
+            const scanCount = guests?.filter(g => g.checked_in).length || 0;
             const sentCount = waMsgs?.filter(m => ['sent', 'delivered', 'read'].includes(m.status)).length || 0;
             const readCount = waMsgs?.filter(m => m.status === 'read').length || 0;
 
@@ -71,7 +72,7 @@ const AnalyticsDashboard: React.FC = () => {
                 totalGuests: total,
                 totalInvited: generatedCount,
                 confirmed: confirmedCount,
-                scanned: scanCount || 0,
+                scanned: scanCount,
                 whatsappSent: sentCount,
                 whatsappRead: readCount
             });

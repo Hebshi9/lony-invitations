@@ -12,6 +12,7 @@ import config from '../lib/config';
 import ConnectionPanel from '../components/WhatsApp/ConnectionPanel';
 import GuestTable from '../components/WhatsApp/GuestTable';
 import * as XLSX from 'xlsx';
+import geminiService from '../services/gemini-service';
 
 const API_URL = config.api.whatsapp;
 
@@ -49,12 +50,20 @@ export default function WhatsAppSender() {
     const [selectedEventId, setSelectedEventId] = useState<string>('');
     const [groomName, setGroomName] = useState('مشاري');
     const [brideName, setBrideName] = useState('رهف');
+    const [eventDate, setEventDate] = useState('اليوم');
+    const [eventLocation, setEventLocation] = useState('الموقع');
+    const [eventTime, setEventTime] = useState('');
+    const [isExtractingAI, setIsExtractingAI] = useState(false);
+    
     const [gateway, setGateway] = useState<'meta' | 'evolution'>('meta');
     const [accounts, setAccounts] = useState<any[]>([]);
     const [selectedAccountId, setSelectedAccountId] = useState<string>('');
     const [templates, setTemplates] = useState<any[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState('lony');
     const [dayUsage, setDayUsage] = useState(0);
+    const [metaLimit, setMetaLimit] = useState(250);
+    const [priority, setPriority] = useState(3);
+    const [dailyBudget, setDailyBudget] = useState(250);
 
     const [guests, setGuests] = useState<any[]>([]);
     const [loadingGuests, setLoadingGuests] = useState(false);
@@ -64,6 +73,7 @@ export default function WhatsAppSender() {
     });
 
     const [isSending, setIsSending] = useState(false);
+    const [isSendingReport, setIsSendingReport] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [shouldStop, setShouldStop] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -77,11 +87,17 @@ export default function WhatsAppSender() {
     const [targetAudience, setTargetAudience] = useState<'all' | 'unsent' | 'replacements'>('all');
     const [isUploading, setIsUploading] = useState(false);
     const [logs, setLogs] = useState<string[]>([]);
-    const [guestFilter, setGuestFilter] = useState<'all' | 'failed' | 'delivered' | 'read' | 'confirmed' | 'declined' | 'entered'>('all');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedGuestForLifecycle, setSelectedGuestForLifecycle] = useState<any>(null);
+    const [testPhone, setTestPhone] = useState('');
+    
+    const [isStabilizing, setIsStabilizing] = useState(false);
+    const [metaMediaId, setMetaMediaId] = useState('');
     
     const isPausedRef = useRef(false);
     const shouldStopRef = useRef(false);
     const logContainerRef = useRef<HTMLDivElement>(null);
+    const activeCampaignRef = useRef<{ targetIds: string[], phase: string, startTime: number } | null>(null);
 
     // Synchronize refs with state for loop access
     useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -100,101 +116,422 @@ export default function WhatsAppSender() {
                 setGlobalImageUrl(ev.settings?.global_invite_image_url || '');
                 setGroomName(ev.settings?.groom_name || 'مشاري');
                 setBrideName(ev.settings?.bride_name || 'رهف');
+                setEventDate(ev.date || 'اليوم');
+                setEventLocation(ev.location || 'قاعة الاحتفالات');
+                setEventTime(ev.time || '');
                 setOwnerPhone(ev.owner_phone || '');
+                setPriority(ev.priority_level || 3);
+                setDailyBudget(ev.daily_budget || 250);
+                setMetaMediaId(ev.meta_media_id || '');
+                
+                // Set initial progress from DB
+                if (ev.campaign_progress) {
+                    setProgress(Math.round((ev.campaign_progress.count / ev.campaign_progress.total) * 100) || 0);
+                    setCurrentBatchIndex(ev.campaign_progress.count || 0);
+                    setTotalBatches(ev.campaign_progress.total || 0);
+                }
             }
+            fetchUsage();
         }
     }, [events, selectedEventId]);
 
-    // ... (keep fetchEvents, fetchAccounts, fetchTemplates, fetchGuests, addLog as they were or slightly improved)
+    const fetchUsage = async () => {
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count } = await supabase.from('whatsapp_messages').select('*', { count: 'exact', head: true }).gte('created_at', yesterday);
+        setDayUsage(count || 0);
+
+        const { data: limit } = await supabase.from('system_settings').select('value').eq('key', 'meta_daily_limit').single();
+        if (limit) setMetaLimit(parseInt(limit.value));
+    };
+
+    const fetchEvents = async () => {
+        const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false });
+        if (data) setEvents(data);
+    };
+
+    const fetchAccounts = async () => { setAccounts([]); }; // Legacy compatibility
+
+    const fetchGuests = async (eventId: string) => {
+        setLoadingGuests(true);
+        // Improved query to get latest message status per guest
+        const { data } = await supabase
+            .from('guests')
+            .select(`*, whatsapp_messages(*)`)
+            .eq('event_id', eventId)
+            .order('name', { ascending: true });
+            
+        if (data) {
+            setGuests(data);
+        }
+        setLoadingGuests(false);
+    };
+
+    // --- REAL-TIME SYNC ---
+    const [realtimeConnected, setRealtimeConnected] = useState(false);
+    
+    useEffect(() => {
+        if (!selectedEventId) return;
+
+        console.log(`[Realtime] Subscribing to Event: ${selectedEventId}`);
+        const guestSub = supabase
+            .channel(`sender_updates_${selectedEventId}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'guests', filter: `event_id=eq.${selectedEventId}` }, (payload) => {
+                console.log('[Realtime] Guest table changed:', payload.eventType);
+                fetchGuests(selectedEventId); 
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_messages', filter: `event_id=eq.${selectedEventId}` }, (payload) => {
+                console.log('[Realtime] Message table changed:', payload.eventType);
+                fetchGuests(selectedEventId); 
+            })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'events', filter: `id=eq.${selectedEventId}` }, (payload) => {
+                const updatedEvent = payload.new;
+                if (updatedEvent.campaign_progress) {
+                    const p = updatedEvent.campaign_progress;
+                    const newProgress = p.total > 0 ? Math.round((p.count / p.total) * 100) : 0;
+                    setProgress(newProgress);
+                    setCurrentBatchIndex(p.count);
+                    setTotalBatches(p.total);
+                    
+                    if (p.current_name && p.current_name !== "Gearing up...") {
+                        addLog(`📡 الإرسال الآن لـ: ${p.current_name}`);
+                    }
+                }
+                
+                if (updatedEvent.campaign_status === 'idle' && isSending) {
+                    setIsSending(false);
+                    addLog("🏁 اكتملت الحملة بنجاح! تم تحديث جميع الحالات.");
+                }
+            })
+            .subscribe((status) => {
+                setRealtimeConnected(status === 'SUBSCRIBED');
+            });
+
+        return () => { guestSub.unsubscribe(); };
+    }, [selectedEventId]);
+
+    // --- REACTIVE STATS ---
+        // --- LIVE PROGRESS CALCULATION (DISABLED: Moved to Server-Side DB Tracking) ---
+        // We now rely on 'events' table subscription above ^
+        const stats = {
+            total: guests.length,
+            sent: guests.filter((g: any) => g.status === 'sent' || g.whatsapp_messages?.length > 0).length,
+            delivered: guests.filter((g: any) => g.whatsapp_messages?.some((m: any) => m.delivery_status === 'delivered' || m.delivery_status === 'read')).length,
+            read: guests.filter((g: any) => g.whatsapp_messages?.some((m: any) => m.delivery_status === 'read') || (g.rsvp_status && g.rsvp_status !== 'none' && g.rsvp_status !== 'pending')).length,
+            failed: guests.filter((g: any) => g.status === 'failed' || g.whatsapp_messages?.some((m: any) => m.status === 'failed')).length,
+            confirmed: guests.filter((g: any) => g.rsvp_status === 'confirmed').length,
+            declined: guests.filter((g: any) => g.rsvp_status === 'declined').length,
+            maybe: guests.filter((g: any) => g.rsvp_status === 'maybe').length,
+            entered: guests.filter((g: any) => g.checked_in).length
+        };
+        setRsvpStats(stats);
+    }, [guests]);
+
+    const addLog = (msg: string) => {
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString('ar-SA')} - ${msg}`]);
+        setTimeout(() => logContainerRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    };
+
+    const handleEventSelect = (e: any) => {
+        const id = e.target.value;
+        setSelectedEventId(id);
+        if (id) fetchGuests(id);
+    };
+
+    const handleRemoveImage = () => setGlobalImageUrl('');
+    
+    const handleImageUpload = async (e: any) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setIsUploading(true);
+        try {
+            const fileName = `${Math.random()}.${file.name.split('.').pop()}`;
+            const { error } = await supabase.storage.from('global-invitations').upload(fileName, file);
+            if (!error) {
+                const { data } = supabase.storage.from('global-invitations').getPublicUrl(fileName);
+                setGlobalImageUrl(data.publicUrl);
+                addLog('✅ تم رفع صورة الدعوة بنجاح.. جرب استخراج بياناتها آلياً!');
+            }
+        } catch (err) {}
+        setIsUploading(false);
+    };
+
+    const handleStabilizeImage = async () => {
+        if (!globalImageUrl || !selectedEventId) return alert('الرجاء رفع صورة واختيار مناسبة أولاً');
+        setIsStabilizing(true);
+        addLog('📤 جاري تثبيت الصورة في سيرفرات فيسبوك (Meta)...');
+        try {
+            const res = await fetch('/.netlify/functions/upload-meta-media', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: globalImageUrl, eventId: selectedEventId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setMetaMediaId(data.mediaId);
+                addLog('✅ تم تثبيت الصورة بنجاح! الإرسال الآن سيكون أسرع وأكثر استقراراً.');
+            } else {
+                addLog(`❌ فشل تثبيت الصورة: ${data.error}`);
+            }
+        } catch (e) {
+            addLog('⚠️ خطأ في الاتصال بخدمة Meta Media');
+        }
+        setIsStabilizing(false);
+    };
+
+    const handleAIExtract = async () => {
+        if (!globalImageUrl) return alert('الرجاء رفع صورة دعوة أولاً ليقرأها الذكاء الاصطناعي');
+        setIsExtractingAI(true);
+        addLog('🤖 يتم الآن تحليل صورة الدعوة باستخدام Gemini Flash 1.5...');
+        try {
+            // Get data via Gemini
+            const extract = await geminiService.extractInvitationDetails(globalImageUrl);
+            if (extract) {
+                if (extract.groom) setGroomName(extract.groom);
+                if (extract.bride) setBrideName(extract.bride);
+                if (extract.date) setEventDate(extract.date);
+                if (extract.location) setEventLocation(extract.location);
+                if (extract.time) setEventTime(extract.time);
+                
+                addLog('✨ تم استخراج البيانات بنجاح! راجع الحقول وقم بتعديل ما تراه غير دقيق.');
+            }
+        } catch (e:any) {
+            console.error(e);
+            addLog('❌ فشل الذكاء الاصطناعي في قراءة الصورة، يرجى تعبئتها يدوياً.');
+        }
+        setIsExtractingAI(false);
+    };
+
+    const handleExportExcel = () => {
+        // Detailed export with status
+        const exportData = guests.map(g => {
+            const hasMsg = g.whatsapp_messages && g.whatsapp_messages.length > 0;
+            const lastMsg = hasMsg ? g.whatsapp_messages[g.whatsapp_messages.length - 1] : null;
+            
+            return {
+                'الاسم': g.name,
+                'الجوال': g.phone,
+                'حالة الدعوة': g.rsvp_status === 'confirmed' ? 'مؤكد' : g.rsvp_status === 'declined' ? 'معتذر' : 'بانتظار الرد',
+                'حالة الإرسال': g.status === 'sent' ? 'تم الإرسال' : g.status === 'failed' ? 'فشل' : 'لم يتم',
+                'حالة الوصول': lastMsg ? (lastMsg.delivery_status === 'read' ? 'تمت القراءة' : lastMsg.delivery_status === 'delivered' ? 'وصلت' : 'مرسلة') : '--',
+                'سبب الفشل': lastMsg?.error_message || ''
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "تقرير الضيوف التفصيلي");
+        
+        // Auto-size columns for better layout
+        const wscols = [{wch:20}, {wch:15}, {wch:15}, {wch:15}, {wch:15}, {wch:30}];
+        ws['!cols'] = wscols;
+
+        XLSX.writeFile(wb, `تقرير_حملة_${new Date().toLocaleDateString()}.xlsx`);
+    };
+
+    const handleDirectSend = async (guest: any) => {
+        if (!selectedEventId) return;
+        addLog(`📤 إرسال فوري لـ ${guest.name}...`);
+        try {
+            const res = await fetch(`/api/send-campaign-background`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    guestIds: [guest.id],
+                    eventId: selectedEventId,
+                    campaignType: campaignType
+                })
+            });
+            if (res.ok) addLog(`✅ الطلب نُفذ بنجاح لـ ${guest.name}`);
+            else addLog(`❌ فشل الطلب لـ ${guest.name}`);
+        } catch (e) {
+            addLog(`⚠️ خطأ في الاتصال بالسيرفر`);
+        }
+    };
+
+    const handleSendTest = async (guest: any) => {
+        const phone = prompt('أدخل رقم الجوال الذي تريد استلام التجربة عليه (مثال: 966...):', ownerPhone || '96650...');
+        if (!phone) return;
+        
+        addLog(`🎯 إرسال تجربة لـ ${guest.name} إلى الرقم ${phone}...`);
+        try {
+            const res = await fetch(`/api/send-campaign-background`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    guestIds: [guest.id],
+                    eventId: selectedEventId,
+                    campaignType: campaignType,
+                    testPhone: phone // Internal logic to override recipient phone
+                })
+            });
+            if (res.ok) addLog(`✅ تم إرسال التجربة بنجاح لـ ${phone}`);
+        } catch (e) {
+            addLog(`⚠️ خطأ في إرسال التجربة`);
+        }
+    };
+
+    const handleRetryAllFailed = async () => {
+        const failedGuests = guests.filter(g => g.status === 'failed' || g.whatsapp_messages?.some((m:any) => m.status === 'failed'));
+        if (failedGuests.length === 0) return alert('لا يوجد ضيوف بحالة "فشل" لإعادة الإرسال لهم');
+        
+        if (!window.confirm(`هل أنت متأكد من إعادة إرسال الدعوة لعدد ${failedGuests.length} ضيف فشل إرسالهم سابقاً؟`)) return;
+        
+        addLog(`🔄 جاري البدء في إعادة إرسال ${failedGuests.length} دعوة فاشلة...`);
+        try {
+             const res = await fetch(`/api/send-campaign-background`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    guestIds: failedGuests.map(g => g.id),
+                    eventId: selectedEventId,
+                    campaignType: campaignType
+                })
+            });
+            if (res.ok) {
+                setIsSending(true);
+                addLog(`✅ بدأت حملة الإعادة السحابية بنجاح.`);
+            }
+        } catch (e) {
+            addLog(`⚠️ خطأ في عملية الإعادة الجماعية`);
+        }
+    };
+
+    const handleOverrideStatus = async (guest: any, newStatus: string) => {
+        const { error } = await supabase.from('guests').update({ rsvp_status: newStatus }).eq('id', guest.id);
+        if (!error) addLog(`✅ تم تحديث حالة ${guest.name} يدوياً إلى: ${newStatus === 'confirmed' ? 'تأكيد' : 'اعتذار'}`);
+    };
+
+    const handleEditPhone = async (guest: any, newPhone: string) => {
+        const { error } = await supabase.from('guests').update({ phone: newPhone }).eq('id', guest.id);
+        if (!error) addLog(`✅ تم تحديث رقم جوال ${guest.name}.. يمكنك الآن الإرسال له.`);
+    };
+
+    const handleSendOwnerReport = async () => {
+        if (!selectedEventId) return;
+        setIsSendingReport(true);
+        addLog('🤖 جاري توليد التقرير الذكي لـ صاحب المناسبة عبر Gemini...');
+        try {
+            const res = await fetch('/.netlify/functions/owner-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ eventId: selectedEventId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                addLog('✅ تم إرسال ملخص المناسبة واتساب لصاحب المناسبة بنجاح!');
+            } else {
+                addLog(`❌ فشل إرسال التقرير: ${data.error || 'خطأ غير معروف'}`);
+            }
+        } catch (e: any) {
+            addLog(`⚠️ خطأ في الاتصال بسيرفر التقارير: ${e.message}`);
+        }
+        setIsSendingReport(false);
+    };
 
     const handleUpdateSettings = async () => {
         if (!selectedEventId) return;
         const ev = events.find(x => x.id === selectedEventId);
-        const settings = { ...(ev?.settings || {}), groom_name: groomName, bride_name: brideName };
+        const settings = { 
+            ...(ev?.settings || {}), 
+            groom_name: groomName, 
+            bride_name: brideName, 
+            global_invite_image_url: globalImageUrl 
+        };
         const { error } = await supabase.from('events').update({ 
             settings,
-            owner_phone: ownerPhone 
+            date: eventDate,
+            location: eventLocation,
+            time: eventTime,
+            owner_phone: ownerPhone,
+            groom_name: groomName,
+            bride_name: brideName,
+            priority_level: priority,
+            daily_budget: dailyBudget
         }).eq('id', selectedEventId);
         
         if (error) addLog(`❌ فشل التحديث: ${error.message}`);
         else {
-            addLog("✅ تم تحديث بيانات المنصة والمناسبة");
+            addLog("✅ تم حفظ المتغيرات وإعدادات الأولوية للمناسبة!");
             fetchEvents();
         }
     };
 
     const handleStartQueue = async () => {
-        if (!selectedEventId) return alert('الرجاء اختيار المناسبة');
+        if (!selectedEventId) {
+            addLog('⚠️ الرجاء اختيار المناسبة أولاً من أعلى الشاشة');
+            return alert('الرجاء اختيار المناسبة');
+        }
         
         let targetGuests = [];
-        if (targetAudience === 'replacements') {
-            targetGuests = guests.filter(g => !g.whatsapp_messages?.some((m:any) => m.message_phase === 'invitation'));
-        } else if (campaignType === 'qr_code') {
-            targetGuests = guests.filter(g => g.rsvp_status === 'confirmed' && !g.card_sent);
-        } else {
+        if (targetAudience === 'all') {
             targetGuests = guests;
+        } else if (targetAudience === 'replacements') {
+            targetGuests = guests.filter(g => g.category === 'replacement' || !g.whatsapp_messages?.some((m:any) => m.message_phase === 'invitation'));
+        } else if (targetAudience === 'unsent') {
+            const tempPhase = campaignType === 'qr_code' ? 'qr_code' : 'invitation';
+            targetGuests = guests.filter(g => !g.whatsapp_messages?.some((m:any) => m.message_phase === tempPhase));
         }
 
-        if (targetGuests.length === 0) return alert('لا يوجد ضيوف مستهدفين حالياً');
-        if (!window.confirm(`بدء إرسال ${targetGuests.length} رسالة؟`)) return;
+        if (campaignType === 'qr_code') {
+            targetGuests = targetGuests.filter(g => g.rsvp_status === 'confirmed');
+        }
+
+        if (targetGuests.length === 0) {
+            addLog(`⚠️ لم يتم العثور على ضيوف مستهدفين في فئة (${targetAudience === 'all' ? 'الكل' : targetAudience === 'unsent' ? 'غير المرسل' : 'البدلاء'})`);
+            return alert('لا يوجد ضيوف مستهدفين في هذه الفئة');
+        }
 
         setIsSending(true);
         setIsPaused(false);
         setShouldStop(false);
         setProgress(0);
-        addLog(`🚀 إطلاق الحملة... الإجمالي: ${targetGuests.length}`);
+        
+        addLog(`🚀 جاري تمرير المهمة إلى المحرك السحابي لـ ${targetGuests.length} ضيف...`);
 
-        const CHUNK_SIZE = 10;
-        const batches = [];
-        for (let i = 0; i < targetGuests.length; i += CHUNK_SIZE) {
-            batches.push(targetGuests.slice(i, i + CHUNK_SIZE));
-        }
-        setTotalBatches(batches.length);
+        try {
+            // AUTO-SAVE: Sync current UI state to DB before background engine fetches it
+            const ev = events.find(x => x.id === selectedEventId);
+            const settings = { ...(ev?.settings || {}), groom_name: groomName, bride_name: brideName, global_invite_image_url: globalImageUrl };
+            await supabase.from('events').update({ 
+                settings,
+                date: eventDate,
+                location: eventLocation,
+                owner_phone: ownerPhone 
+            }).eq('id', selectedEventId);
 
-        for (let i = 0; i < batches.length; i++) {
-            // Check for Stop signal
-            if (shouldStopRef.current) {
-                addLog("🛑 تم إيقاف الحملة من قبل المستخدم");
-                break;
-            }
-
-            // Check for Pause signal
-            while (isPausedRef.current) {
-                await new Promise(r => setTimeout(r, 1000));
-                if (shouldStopRef.current) break;
-            }
-            if (shouldStopRef.current) break;
-
-            setCurrentBatchIndex(i + 1);
-            const chunk = batches[i];
-            addLog(`⏳ إرسال الدفعة ${i + 1} من ${batches.length}...`);
-
-            try {
-                const res = await fetch('/.netlify/functions/send-final', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        guestIds: chunk.map(g => g.id),
-                        eventId: selectedEventId,
-                        campaignType: campaignType
-                    })
-                });
-                const data = await res.json();
+            const res = await fetch(`/api/send-campaign-background`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    guestIds: targetGuests.map(g => g.id),
+                    eventId: selectedEventId,
+                    campaignType: campaignType
+                })
+            });
+            
+            if (res.status === 202 || res.ok) {
+                addLog(`✅ المهمة انتقلت للسحابة بنجاح!`);
+                addLog(`🤖 يمكنك إغلاق المتصفح الآن، النظام يرسل آلياً وبدقة عالية.`);
                 
-                if (res.ok) {
-                    addLog(`✅ اكتملت الدفعة ${i+1}`);
-                    setProgress(Math.round(((i + 1) / batches.length) * 100));
-                }
-            } catch (e:any) {
-                addLog(`⚠️ خطأ في الدفعة ${i+1}: ${e.message}`);
+                // Set the campaign ref to trigger reactive progress in useEffect
+                activeCampaignRef.current = {
+                    targetIds: targetGuests.map(g => g.id),
+                    phase: campaignType === 'qr_code' ? 'qr_code' : 'invitation',
+                    startTime: Date.now()
+                };
+                
+                setTotalBatches(targetGuests.length);
+                setCurrentBatchIndex(0);
+                setProgress(0);
+            } else {
+                addLog(`❌ السيرفر مشغول حالياً، يرجى المحاولة بعد قليل.`);
+                setIsSending(false);
             }
-
-            await new Promise(r => setTimeout(r, 1000)); // Rate limiting safety
+        } catch (e:any) {
+            console.error('Campaign Launch Error:', e);
+            addLog(`⚠️ خطأ في محرك الإرسال: ${e.message}`);
+            setIsSending(false);
         }
-
-        setIsSending(false);
-        addLog("🏁 اكتملت المهمة بالكامل");
-        fetchGuests(selectedEventId);
     };
 
     return (
@@ -224,25 +561,74 @@ export default function WhatsAppSender() {
                                     <input type="file" className="hidden" onChange={handleImageUpload} accept="image/*" />
                                 </label>
                             )}
+                            {globalImageUrl && (
+                                <Button 
+                                    onClick={handleStabilizeImage}
+                                    disabled={isStabilizing || !!metaMediaId}
+                                    className={`w-full mt-2 h-8 text-[9px] font-black flex items-center gap-2 ${metaMediaId ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                                    variant="outline"
+                                >
+                                    {isStabilizing ? <Loader2 className="w-3 h-3 animate-spin"/> : metaMediaId ? <Shield className="w-3 h-3"/> : <Zap className="w-3 h-3"/>}
+                                    {metaMediaId ? 'تم التثبيت (Meta ID)' : 'تثبيت الصورة (Meta Stability)'}
+                                </Button>
+                            )}
                         </div>
 
                         <div className="bg-white p-4 rounded-2xl border border-slate-100 space-y-4">
-                            <label className="text-[10px] font-black text-slate-400 uppercase block tracking-widest">إعدادات المناسبة</label>
+                            <div className="flex justify-between items-center">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">إعدادات المناسبة</label>
+                                <button 
+                                    onClick={handleAIExtract}
+                                    disabled={isExtractingAI || !globalImageUrl}
+                                    className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded mt-[-5px] hover:bg-indigo-100 transition text-[9px] font-bold flex items-center gap-1 disabled:opacity-50"
+                                    title="استخراج ذكي لبيانات الدعوة (OCR)"
+                                >
+                                    {isExtractingAI ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>}
+                                    AI قراءة
+                                </button>
+                            </div>
                             <div className="space-y-3">
-                                <div>
-                                    <label className="text-[9px] text-slate-400 block mb-1">اسم العريس</label>
-                                    <input value={groomName} onChange={e=>setGroomName(e.target.value)} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20" />
-                                </div>
-                                <div>
-                                    <label className="text-[9px] text-slate-400 block mb-1">اسم العروس</label>
-                                    <input value={brideName} onChange={e=>setBrideName(e.target.value)} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20" />
-                                </div>
-                                <div>
-                                    <label className="text-[9px] text-indigo-400 block mb-1 font-black">رقم صاحب المناسبة (للتقارير)</label>
-                                    <input value={ownerPhone} onChange={e=>setOwnerPhone(e.target.value)} placeholder="966..." className="w-full bg-indigo-50/50 border border-indigo-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20" />
+                                 <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="text-[9px] text-slate-400 block mb-1">الأولوية</label>
+                                        <select value={priority} onChange={e=>setPriority(parseInt(e.target.value))} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none">
+                                            <option value={1}>عاجل جداً 🔥</option>
+                                            <option value={2}>مرتفع ⬆️</option>
+                                            <option value={3}>عادي 🟢</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-[9px] text-slate-400 block mb-1">ميزانية اليوم</label>
+                                        <input type="number" value={dailyBudget} onChange={e=>setDailyBudget(parseInt(e.target.value))} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
+                                    </div>
                                 </div>
                                 <Button onClick={handleUpdateSettings} className="w-full bg-indigo-600 text-white h-9 rounded-xl font-black text-[10px]">حفظ التعديلات</Button>
                             </div>
+                        </div>
+
+                        {/* WhatsApp Live Preview Mockup */}
+                        <div className="bg-[#E5DDD5] p-4 rounded-[2rem] border border-slate-200 relative overflow-hidden shadow-inner">
+                            <div className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl shadow-sm border border-white relative z-10">
+                                <div className="flex items-center gap-2 mb-3 border-b pb-2 border-slate-100">
+                                    <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-400 font-black text-[10px]">L</div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-black text-slate-700">Lony Invitations</span>
+                                        <span className="text-[8px] text-slate-400 font-bold">Business Account</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    {globalImageUrl && <img src={globalImageUrl} className="rounded-lg w-full aspect-video object-cover border border-slate-100 shadow-sm" />}
+                                    <div className="bg-[#D9FDD3] p-3 rounded-tr-none rounded-2xl text-[11px] font-bold leading-relaxed text-slate-800 shadow-sm border border-emerald-100">
+                                        أهلاً بك يا [اسم الضيف] 🌺<br/>
+                                        ندعوكم لحضور حفل زفاف {groomName} و {brideName} يوم {eventDate} في {eventLocation} في تمام الساعة {eventTime}...
+                                        <div className="mt-2 pt-2 border-t border-emerald-200/50 flex flex-col gap-2">
+                                            <div className="bg-white py-1.5 rounded-lg text-center text-indigo-600 text-[10px] shadow-sm border border-indigo-50">✅ تأكيد الحضور</div>
+                                            <div className="bg-white py-1.5 rounded-lg text-center text-rose-600 text-[10px] shadow-sm border border-slate-50">❌ اعتذار</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="absolute top-0 right-0 w-full h-full opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#000 0.5px, transparent 0.5px)', backgroundSize: '10px 10px' }}></div>
                         </div>
                     </div>
                 </div>
@@ -265,12 +651,43 @@ export default function WhatsAppSender() {
                         </div>
                     </div>
 
+                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3">
+                        <label className="text-[10px] font-black text-amber-600 uppercase block tracking-widest flex items-center gap-2"><Settings className="w-3 h-3"/> مركز المتابعة (Follow-up)</label>
+                        <div className="grid grid-cols-1 gap-2">
+                             <Button 
+                                onClick={() => { setCampaignType('invite'); setTargetAudience('unsent'); handleStartQueue(); }}
+                                className="bg-white border-amber-200 text-amber-700 h-8 text-[10px] font-black hover:bg-amber-100"
+                                variant="outline"
+                            >
+                                🔔 تذكير من لم يرد (Pending)
+                            </Button>
+                            <Button 
+                                onClick={() => { setCampaignType('qr_code'); setTargetAudience('all'); handleStartQueue(); }}
+                                className="bg-white border-indigo-200 text-indigo-700 h-8 text-[10px] font-black hover:bg-indigo-100"
+                                variant="outline"
+                            >
+                                🎫 تذكير ليلة الحفل (Confirmed)
+                            </Button>
+                        </div>
+                    </div>
+
                     <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100 space-y-3">
                         <label className="text-[10px] font-black text-emerald-600 uppercase block tracking-widest flex items-center gap-2"><Bot className="w-3 h-3"/> أتمتة الردود الذكية</label>
                         <div className="flex items-center justify-between text-[9px] font-bold text-slate-500">
                             <span>إرسال الباركود آلياً عند التأكيد</span>
-                            <div className="w-8 h-4 bg-emerald-500 rounded-full relative"><div className="absolute right-1 top-1 w-2 h-2 bg-white rounded-full shadow-sm"></div></div>
+                            <div className="w-8 h-4 bg-emerald-500 rounded-full relative shadow-inner"><div className="absolute right-1 top-1 w-2 h-2 bg-white rounded-full shadow-sm"></div></div>
                         </div>
+                    </div>
+
+                    <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3">
+                        <label className="text-[10px] font-black text-amber-600 uppercase block tracking-widest flex items-center gap-2"><Mail className="w-3 h-3"/> هاتف تقارير العميل</label>
+                        <input 
+                            type="text" 
+                            value={ownerPhone} 
+                            onChange={e => setOwnerPhone(e.target.value)}
+                            placeholder="9665..."
+                            className="w-full bg-white border border-amber-100 rounded-xl px-3 py-2 text-[10px] font-black outline-none focus:ring-2 ring-amber-500/20"
+                        />
                     </div>
                 </div>
             </aside>
@@ -285,6 +702,17 @@ export default function WhatsAppSender() {
                                 <option value="">اختر مناسبة لبدء العمل..</option>
                                 {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                             </select>
+                        </div>
+                        <div className="h-10 w-[1px] bg-slate-100 mx-2" />
+                        <div className="flex flex-col">
+                            <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">هاتف التقارير</label>
+                            <input 
+                                type="text"
+                                value={ownerPhone}
+                                onChange={e => setOwnerPhone(e.target.value)}
+                                className="bg-transparent border-none p-0 text-sm font-black text-slate-600 outline-none focus:ring-0 w-32"
+                                placeholder="9665..."
+                            />
                         </div>
                     </div>
 
@@ -308,38 +736,96 @@ export default function WhatsAppSender() {
                         </div>
                     )}
 
-                    <Button onClick={handleExportExcel} className="bg-emerald-600 text-white rounded-xl text-[10px] font-black px-6 h-10 hover:shadow-lg shadow-emerald-100 flex items-center gap-2">
-                        <Download className="w-4 h-4" /> تقرير EXCEL
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button 
+                            onClick={handleSendOwnerReport} 
+                            disabled={!selectedEventId || isSendingReport}
+                            className="bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-[10px] font-black px-6 h-10 hover:bg-indigo-200 flex items-center gap-2"
+                        >
+                            {isSendingReport ? <Loader2 className="w-4 h-4 animate-spin"/> : <Bot className="w-4 h-4" />} 
+                            إرسال ملخص لصاحب المناسبة
+                        </Button>
+                        <Button onClick={handleExportExcel} className="bg-emerald-600 text-white rounded-xl text-[10px] font-black px-6 h-10 hover:shadow-lg shadow-emerald-100 flex items-center gap-2">
+                            <Download className="w-4 h-4" /> تقرير EXCEL
+                        </Button>
+                        
+                        {/* Meta Quota Monitor Pulse */}
+                        <div className="flex items-center gap-3 bg-slate-50 px-4 py-1.5 rounded-xl border border-slate-100">
+                            <div className="flex flex-col text-left">
+                                <span className="text-[8px] font-black text-slate-400 tracking-tighter uppercase whitespace-nowrap">Meta Daily Quota</span>
+                                <span className="text-[10px] font-black text-slate-700">{dayUsage} / {metaLimit}</span>
+                            </div>
+                            <div className="w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                <div 
+                                    className={`h-full transition-all duration-1000 ${(metaLimit > 0 && dayUsage / metaLimit > 0.9) ? 'bg-rose-500' : 'bg-indigo-500'}`} 
+                                    style={{ width: `${metaLimit > 0 ? Math.min((dayUsage / metaLimit) * 100, 100) : 0}%` }} 
+                                />
+                            </div>
+                            <div className={`w-2 h-2 rounded-full ${dayUsage/metaLimit > 0.9 ? 'bg-rose-500' : 'bg-emerald-500'} animate-pulse`} />
+                        </div>
+                    </div>
                 </header>
 
                 <main className="flex-1 overflow-y-auto p-8 lg:p-10 space-y-10">
                     {/* Progress Monitor (Top) */}
                     {isSending && (
-                        <div className="bg-white p-8 rounded-[2rem] border-2 border-indigo-600/10 shadow-xl shadow-indigo-100/20 relative overflow-hidden group">
-                           <div className="absolute top-0 right-0 h-1 bg-indigo-600 transition-all duration-1000" style={{ width: `${progress}%` }} />
-                           <div className="flex flex-col md:flex-row justify-between items-center gap-8">
-                                <div className="flex items-center gap-6">
-                                    <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center relative overflow-hidden">
-                                        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin z-10" />
-                                        <div className="absolute inset-x-0 bottom-0 bg-indigo-100 transition-all duration-500" style={{ height: `${progress}%` }} />
+                        <div className="bg-slate-900 mx-8 p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
+                           <div className="flex flex-col lg:flex-row justify-between items-center gap-10 relative z-10">
+                                <div className="flex items-center gap-8">
+                                    <div className="relative">
+                                        <div className="w-24 h-24 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-400/30">
+                                            <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+                                        </div>
+                                        <div className="absolute -top-2 -right-2 bg-emerald-500 text-white text-[8px] px-2 py-0.5 rounded-full font-black animate-bounce shadow-lg">V2 LIVE</div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <h3 className="text-2xl font-black text-slate-800 tracking-tight">جاري معالجة الحملة...</h3>
-                                        <p className="text-xs text-slate-400 font-bold">يرجى عدم إغلاق الصفحة لضمان استمرارية الإرسال</p>
+                                    <div className="space-y-2">
+                                        <h3 className="text-3xl font-black text-white tracking-tight">جاري الإرسال الآن...</h3>
+                                        <p className="text-xs text-slate-400 font-bold flex items-center gap-2">
+                                            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> 
+                                            المستهدف: {totalBatches} ضيف في هذه الحملة
+                                        </p>
                                     </div>
                                 </div>
-                                <div className="flex gap-4">
-                                    <div className="text-center bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
-                                        <span className="text-[10px] text-slate-400 font-black block mb-1 uppercase uppercase tracking-tighter">SENT_COUNT</span>
-                                        <span className="text-xl font-black text-slate-800">{currentBatchIndex * 10}</span>
+
+                                <div className="flex-1 max-w-2xl w-full">
+                                    <div className="flex justify-between items-end mb-3">
+                                        <div className="flex flex-col">
+                                            <span className="text-4xl font-black text-white">{progress}%</span>
+                                            {isSending && (
+                                                <div className="flex items-center gap-2 bg-indigo-500/20 px-3 py-1 rounded-full border border-indigo-400/20 animate-pulse">
+                                                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                                                    <span className="text-[10px] font-black text-indigo-100 uppercase tracking-widest">
+                                                        {(events.find(e => e.id === selectedEventId)?.campaign_progress?.current_name) || 'Processing...'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-4">
+                                            <div className="text-left">
+                                                <span className="text-[9px] font-black text-emerald-400 uppercase block tracking-widest">SUCCESS</span>
+                                                <span className="text-xl font-black text-white">{currentBatchIndex}</span>
+                                            </div>
+                                            <div className="text-left border-r border-slate-700 pr-4">
+                                                <span className="text-[9px] font-black text-rose-400 uppercase block tracking-widest">FAILED</span>
+                                                <span className="text-xl font-black text-white">{rsvpStats.failed}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="text-center bg-indigo-600 px-8 py-3 rounded-2xl text-white shadow-xl shadow-indigo-100">
-                                        <span className="text-[10px] opacity-60 font-black block mb-1 uppercase tracking-tighter">OVERALL_PROGRESS</span>
-                                        <span className="text-xl font-black">{progress}%</span>
+                                    
+                                    <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden p-1 border border-slate-700 shadow-inner">
+                                        <div 
+                                            className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 rounded-full shadow-lg transition-all duration-1000 ease-out relative"
+                                            style={{ width: `${progress}%` }}
+                                        >
+                                            <div className="absolute inset-0 bg-white/20 animate-[pulse_1.5s_infinite]"></div>
+                                        </div>
                                     </div>
                                 </div>
                            </div>
+                           
+                           {/* Decorative background shapes */}
+                           <div className="absolute -right-20 -top-20 w-64 h-64 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+                           <div className="absolute -left-20 -bottom-20 w-64 h-64 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
                         </div>
                     )}
 
@@ -351,6 +837,31 @@ export default function WhatsAppSender() {
                         <StatCard label="وصلت (Delivered)" value={rsvpStats.delivered} color="green" icon={<MailCheck className="w-5 h-5" />} />
                         <StatCard label="تمت القراءة" value={rsvpStats.read} color="amber" icon={<Eye className="w-5 h-5" />} />
                         <StatCard label="فشل الإرسال" value={rsvpStats.failed} color="red" icon={<AlertTriangle className="w-5 h-5" />} />
+                    </div>
+
+                    {/* Search & Filter Bar */}
+                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6 items-center">
+                        <div className="flex-1 w-full relative">
+                            <Bot className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input 
+                                type="text"
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                placeholder="ابحث بالاسم أو رقم الجوال..."
+                                className="w-full bg-slate-50 border-none rounded-2xl pr-12 py-3.5 text-xs font-bold outline-none ring-2 ring-transparent focus:ring-indigo-500/10 transition-all"
+                            />
+                        </div>
+                        <div className="flex items-center gap-1.5 p-1 bg-slate-50 rounded-2xl border border-slate-100 overflow-x-auto w-full md:w-auto">
+                            {(['all', 'confirmed', 'declined', 'failed'] as const).map((filter) => (
+                                <button
+                                    key={filter}
+                                    onClick={() => setGuestFilter(filter)}
+                                    className={`px-6 py-2.5 rounded-xl text-[10px] font-black transition-all whitespace-nowrap ${guestFilter === filter ? 'bg-white text-indigo-600 shadow-sm border border-slate-100 animate-in fade-in zoom-in duration-300' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    {filter === 'all' ? 'الكل' : filter === 'confirmed' ? 'تأكيد الحضور' : filter === 'declined' ? 'المعتذرين' : 'فشل الإرسال'}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 h-[800px] pb-20">
@@ -366,33 +877,56 @@ export default function WhatsAppSender() {
                                 </div>
                                 <div className="p-8 space-y-8 flex-1">
                                     <div className="bg-slate-50 p-6 rounded-3xl space-y-4 border border-slate-100">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">مخطط المتغيرات (Template Map)</label>
-                                        <div className="space-y-2">
-                                            {[
-                                                ['{{1}}', 'اسم الضيف'],
-                                                ['{{2}}', 'اسم العريس'],
-                                                ['{{3}}', 'اسم العروس'],
-                                                ['{{4}}', 'تاريخ المناسبة'],
-                                                ['{{5}}', 'موقع القاعة']
-                                            ].map(([k,v], i) => (
-                                                <div key={i} className="flex justify-between items-center text-[11px] font-bold text-slate-600 bg-white p-2 rounded-xl border border-slate-100 shadow-sm">
-                                                    <span>{v}</span>
-                                                    <span className="font-mono text-indigo-600">{k}</span>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">استوديو المتغيرات (AI Studio)</label>
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1">
+                                                    <label className="text-[8px] font-black text-slate-400 uppercase">اسم العريس</label>
+                                                    <input value={groomName} onChange={e=>setGroomName(e.target.value)} className="w-full bg-white border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
                                                 </div>
-                                            ))}
+                                                <div className="space-y-1">
+                                                    <label className="text-[8px] font-black text-slate-400 uppercase">اسم العروس</label>
+                                                    <input value={brideName} onChange={e=>setBrideName(e.target.value)} className="w-full bg-white border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1">
+                                                    <label className="text-[8px] font-black text-slate-400 uppercase">التاريخ</label>
+                                                    <input value={eventDate} onChange={e=>setEventDate(e.target.value)} className="w-full bg-white border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[8px] font-black text-slate-400 uppercase">الوقت</label>
+                                                    <input value={eventTime} onChange={e=>setEventTime(e.target.value)} placeholder="مثلاً: 8 مساءً" className="w-full bg-white border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[8px] font-black text-slate-400 uppercase">الموقع / القاعة</label>
+                                                <input value={eventLocation} onChange={e=>setEventLocation(e.target.value)} className="w-full bg-white border border-slate-100 rounded-xl px-2 py-2 text-[10px] font-bold outline-none" />
+                                            </div>
                                         </div>
                                     </div>
 
                                     {!isSending ? (
-                                        <Button 
-                                            onClick={handleStartQueue} 
-                                            disabled={loadingGuests || !selectedEventId}
-                                            className="w-full h-24 bg-indigo-600 text-white rounded-[2rem] shadow-2xl shadow-indigo-100 hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center gap-1 group"
-                                        >
-                                            <Send className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-                                            <span className="text-xl font-black">إطلاق الدعوات الآن</span>
-                                            <span className="text-[9px] font-bold opacity-60 italic">سيتم الإرسال لعدد {guests.length} ضيف</span>
-                                        </Button>
+                                        <div className="space-y-4">
+                                            <Button 
+                                                onClick={handleStartQueue} 
+                                                disabled={loadingGuests || !selectedEventId}
+                                                className="w-full h-24 bg-indigo-600 text-white rounded-[2rem] shadow-2xl shadow-indigo-100 hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center gap-1 group"
+                                            >
+                                                <Send className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                                                <span className="text-xl font-black">إطلاق الدعوات الآن</span>
+                                                <span className="text-[9px] font-bold opacity-60 italic">سيتم الإرسال لعدد {guests.length} ضيف</span>
+                                            </Button>
+                                            
+                                            {rsvpStats.failed > 0 && (
+                                                <Button 
+                                                    onClick={handleRetryAllFailed}
+                                                    className="w-full h-12 bg-rose-50 text-rose-600 border border-rose-100 rounded-2xl font-black text-xs hover:bg-rose-100 transition-colors flex items-center justify-center gap-2"
+                                                >
+                                                    <RefreshCw className="w-4 h-4" /> إعادة إرسال الكل ({rsvpStats.failed}) فاشل
+                                                </Button>
+                                            )}
+                                        </div>
                                     ) : (
                                         <div className="flex gap-4">
                                             <Button onClick={() => setIsPaused(!isPaused)} className={`flex-1 h-16 rounded-2xl font-black transition-all ${isPaused ? 'bg-emerald-600 text-white' : 'bg-amber-100 text-amber-700'}`}>
@@ -423,7 +957,24 @@ export default function WhatsAppSender() {
                             <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
                                 <div className="flex items-center gap-4">
                                     <div className="p-2.5 bg-indigo-100 rounded-xl"><User className="w-5 h-5 text-indigo-600" /></div>
-                                    <h3 className="text-xl font-black text-slate-800">تتبع الضيوف لحظياً</h3>
+                                    <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="text-xl font-black text-slate-800 leading-none">تتبع الضيوف لحظياً</h3>
+                                            <button 
+                                                onClick={() => selectedEventId && fetchGuests(selectedEventId)}
+                                                className="p-1.5 hover:bg-indigo-50 text-indigo-400 hover:text-indigo-600 rounded-lg transition-all"
+                                                title="تحديث البيانات يدوياً"
+                                            >
+                                                <RefreshCw className={`w-3.5 h-3.5 ${loadingGuests ? 'animate-spin' : ''}`} />
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 mt-1">
+                                            <span className={`w-1.5 h-1.5 rounded-full ${realtimeConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                            <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">
+                                                {realtimeConnected ? 'V2_PRO_TRACKING_ACTIVE' : 'OFFLINE_MODE'}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div className="flex bg-white rounded-xl border p-1 shadow-sm gap-1">
                                     {['all', 'confirmed', 'declined', 'failed'].map(f => (
@@ -445,12 +996,66 @@ export default function WhatsAppSender() {
                                     onDirectSend={handleDirectSend}
                                     onOverrideStatus={handleOverrideStatus}
                                     onEditPhone={handleEditPhone}
+                                    onShowLifecycle={setSelectedGuestForLifecycle}
+                                    onSendTest={handleSendTest}
                                 />
                             </div>
                         </div>
                     </div>
                 </main>
             </div>
+
+            {/* Lifecycle Modal */}
+            {selectedGuestForLifecycle && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
+                    <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
+                        <div className="p-8 border-b flex justify-between items-center bg-slate-50">
+                            <div>
+                                <h3 className="text-2xl font-black text-slate-800">دورة حياة الرسالة</h3>
+                                <p className="text-xs text-slate-400 font-bold mt-1">تتبع دقيق لكل خطوة لـ: {selectedGuestForLifecycle.name}</p>
+                            </div>
+                            <button onClick={() => setSelectedGuestForLifecycle(null)} className="p-2 hover:bg-white rounded-full transition-colors border">
+                                <RotateCcw className="w-5 h-5 text-slate-400" />
+                            </button>
+                        </div>
+                        <div className="p-10 space-y-8">
+                            {selectedGuestForLifecycle.whatsapp_messages?.length > 0 ? (
+                                <div className="space-y-6 relative before:absolute before:right-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
+                                    {selectedGuestForLifecycle.whatsapp_messages.map((m: any, idx: number) => (
+                                        <div key={idx} className="relative pr-12 group">
+                                            <div className="absolute right-0 top-1 w-8 h-8 rounded-full bg-white border-2 border-indigo-500 shadow-sm z-10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                                <div className="w-2 h-2 bg-indigo-500 rounded-full" />
+                                            </div>
+                                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group-hover:border-indigo-100 transition-colors">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{m.message_phase?.toUpperCase() || 'INFO'}</span>
+                                                    <span className="text-[10px] text-slate-400 font-bold">{new Date(m.created_at).toLocaleString('ar-SA')}</span>
+                                                </div>
+                                                <p className="text-xs font-bold text-slate-700">{m.message_text || 'إرسال عبر Meta Cloud API'}</p>
+                                                <div className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase ${
+                                                    m.delivery_status === 'read' ? 'bg-sky-50 text-sky-600 border border-sky-100' :
+                                                    m.delivery_status === 'delivered' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                                                    'bg-slate-100 text-slate-500 border border-slate-200'
+                                                }`}>
+                                                    {m.delivery_status === 'read' ? 'تمت القراءة ✅✅' : m.delivery_status === 'delivered' ? 'وصلت للجوال ✅' : 'مرسلة 📤'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="py-20 text-center space-y-3 opacity-30">
+                                    <Clock className="w-12 h-12 mx-auto text-slate-300" />
+                                    <p className="font-bold text-slate-500">لا توجد سجلات بعد لهذا الضيف</p>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-8 border-t bg-slate-50 text-center">
+                            <Button onClick={() => setSelectedGuestForLifecycle(null)} className="bg-slate-900 text-white px-8 rounded-xl font-black">إغلاق السجل</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

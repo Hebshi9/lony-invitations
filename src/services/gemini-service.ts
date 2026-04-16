@@ -266,6 +266,78 @@ class GeminiService {
     }
 
     /**
+     * Extract Invitation Data (OCR)
+     * Reads the invitation image and extracts Groom, Bride, Date, Location, Time
+     */
+    async extractInvitationDetails(imageSource: string): Promise<{
+        groom?: string;
+        bride?: string;
+        date?: string;
+        location?: string;
+        time?: string;
+    }> {
+        try {
+            let base64Data = imageSource;
+            let mimeType = 'image/jpeg';
+
+            // If it's a URL, fetch it first
+            if (imageSource.startsWith('http')) {
+                const response = await fetch(imageSource);
+                const blob = await response.blob();
+                mimeType = blob.type;
+                const arrayBuffer = await blob.arrayBuffer();
+                base64Data = btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+            } else if (imageSource.includes('base64,')) {
+                base64Data = imageSource.split('base64,')[1];
+                mimeType = imageSource.split(';')[0].split(':')[1];
+            }
+
+            const prompt = `
+أنت خبير في قراءة وتحليل كروت دعوات الزفاف العربية.
+حلل هذه الصورة واستخرج البيانات التالية بدقة باللغة العربية:
+1. اسم العريس (أو عائلة العريس)
+2. اسم العروس (أو عائلة العروس)
+3. تاريخ المناسبة (باليوم والتاريخ الهجري أو الميلادي)
+4. موقع القاعة (اسم القاعة والمدينة)
+5. وقت الحضور (مثلاً: بعد صلاة العشاء، الساعة 8 مساءً)
+
+الرد يجب أن يكون JSON فقط بهذا الشكل:
+{
+  "groom": "...",
+  "bride": "...",
+  "date": "...",
+  "location": "...",
+  "time": "..."
+}
+
+ملاحظة: إذا لم تجد بياناً معيناً، ضع "". لا تضف أي نص خارج JSON.
+            `;
+
+            const result = await this.model.generateContent([
+                prompt,
+                {
+                    inlineData: {
+                        data: base64Data,
+                        mimeType: mimeType
+                    }
+                }
+            ]);
+
+            const text = result.response.text();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
+            }
+
+            return {};
+        } catch (error) {
+            console.error('[Gemini] Extraction failed:', error);
+            return {};
+        }
+    }
+
+    /**
      * Check if API key is configured
      */
     isConfigured(): boolean {

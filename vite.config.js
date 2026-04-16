@@ -22,6 +22,10 @@ export default defineConfig({
         target: 'http://62.171.172.76:3001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/remote-sales/, '/api/sales')
+      },
+      '/api/send-campaign-background': {
+        target: 'http://localhost:8888',
+        changeOrigin: true
       }
     },
     hmr: {

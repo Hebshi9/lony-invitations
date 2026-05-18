@@ -130,7 +130,7 @@ export const handler = async (eventReq, context) => {
                 } else if (templateName.trim() === 'get_update' || true) { // FORCE GET_UPDATE FOR DEBUG
                     // DIRECT LINK PASS-THROUGH - URL-encode coordinates for Meta URL button
                     let mapCoords = encodeURIComponent(event.location_maps_url || eventLocation || 'قاعة الاحتفالات');
-                    const personalHeaderImage = body.headerImage || guest.card_image_url || headerImage;
+                    const personalHeaderImage = headerImage;
 
                     payload = {
                         messaging_product: 'whatsapp', to: phone, type: 'template',

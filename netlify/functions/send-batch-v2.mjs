@@ -32,7 +32,7 @@ export const handler = async (eventReq, context) => {
 
             const eventLocation = event.location || event.location_name || 'الموقع';
             const templateName = event.template_name || 'get_update';
-            const headerImage = body.headerImage || event.settings?.global_invite_image_url || guest.card_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
+            const headerImage = body.headerImage || event.settings?.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
 
             let payload;
             if (campaignType === 'manual_bridge') {

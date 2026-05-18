@@ -409,11 +409,12 @@ async function handleRSVP(phone, status, contextId = null) {
       .limit(10);
 
     if (guestMatches && guestMatches.length > 0) {
-      // 🥇 First priority: Most recent guest WITH a personalized card image
-      const bestMatch = guestMatches.find(g => g.card_image_url) || guestMatches[0];
+      // 🥇 Priority: Most RECENT guest record (already sorted by created_at DESC)
+      // This ensures the latest event invitation is matched, not an old one from another event
+      const bestMatch = guestMatches[0];
       targetGuestId = bestMatch.id;
       targetEventId = bestMatch.event_id;
-      console.log(`[Smart Match] Found Guest ID: ${targetGuestId} (Has Card: ${!!bestMatch.card_image_url})`);
+      console.log(`[Smart Match] Found Guest ID: ${targetGuestId} (Event: ${targetEventId}, Most Recent Record)`);
     }
   }
 

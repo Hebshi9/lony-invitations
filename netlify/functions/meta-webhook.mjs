@@ -1,15 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
-const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://gxunxhzjqclddoobxvpz.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NDUzMDM0MywiZXhwIjoyMDgwMTA2MzQzfQ.T2inWTfgbr_s2nM_O1K6MSbt32-IpzeffkdJwwM0LP0';
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAV4hiaLibsBRIZBfcKbHswSgZAZA8yxn9wcjAn3fZBO3FsPIEkqY4O1IHkiGcKMAWFTZAm4M0CsfaCGX8fUyCbGSdVbYq6gW0a5VGgRdAsRZA0yTB2ZCc6cFQ796eKOVe6DmU34UW25jBYMnGFm91fSGIMO6bXWZC3SkSKswH0YZBK0tgfN2Er2z7iAvAK75ZAdUtAukesvmyOb9Rrbb1pQiRDpQITe1zBTkjuWRG';
+const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID || '1031606736708015';
 const META_VERSION = 'v21.0';
 const VERIFY_TOKEN = 'lony_invite_v1_secure';
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export const handler = async (event) => {
   console.log(`[Meta Webhook] Incoming ${event.httpMethod} request`);
@@ -52,16 +54,8 @@ export const handler = async (event) => {
       const entry = body.entry?.[0];
       const changes = entry?.changes?.[0]?.value;
 
-      // EMERGENCY LOGGING: Save raw payload to DB for diagnosis
-      if (changes?.messages?.length > 0) {
-        const phone = changes.messages[0].from;
-        await supabase.from('whatsapp_messages').insert([{
-          phone: phone,
-          message_text: `DEBUG_RAW_PAYLOAD: ${rawBody.substring(0, 1000)}`,
-          status: 'debug',
-          message_phase: 'debug'
-        }]);
-      }
+      // FORENSIC LOGGING (moved to webhook_debug_logs only — no pollution in whatsapp_messages)
+      // Raw payload is already logged in lines 35-37 above
 
       // 📝 SNOOPER: Extract Message ID or Statuses
       if (changes?.statuses) {
@@ -93,6 +87,19 @@ export const handler = async (event) => {
 
         console.log(`[Webhook] Status Update: ${wamid} -> ${status} ${errorMsg ? `(Reason: ${errorMsg})` : ''}`);
         
+        // --- STATUS ORDER PROTECTION: Never downgrade status ---
+        const statusRank = { 'failed': 0, 'sent': 1, 'delivered': 2, 'read': 3 };
+        const { data: existingMsg } = await supabase.from('whatsapp_messages')
+          .select('delivery_status, guest_id')
+          .eq('evolution_message_id', wamid)
+          .single();
+
+        // Skip if current status is already higher (e.g. don't overwrite 'read' with 'delivered')
+        if (existingMsg && (statusRank[status] || 0) < (statusRank[existingMsg.delivery_status] || 0)) {
+            console.log(`[Webhook] Skipping downgrade: ${existingMsg.delivery_status} → ${status}`);
+            return { statusCode: 200, body: 'OK' };
+        }
+
         const updateData = { 
             delivery_status: status,
             error_message: errorMsg,
@@ -101,19 +108,58 @@ export const handler = async (event) => {
         };
 
         // 1. Update the message log
-        const { data: updatedMsg } = await supabase.from('whatsapp_messages')
+        let updatedMsg = null;
+        const { data: firstTry } = await supabase.from('whatsapp_messages')
           .update(updateData)
           .eq('evolution_message_id', wamid)
           .select('guest_id')
           .single();
 
+        // --- RACE CONDITION FIX: If wamid not found, wait 2s and retry ---
+        // (Meta can send webhook BEFORE our engine writes the row to DB)
+        if (!firstTry) {
+            console.log(`[Webhook] WAMID ${wamid} not found. Waiting 2s for engine to write...`);
+            await new Promise(r => setTimeout(r, 2000));
+            const { data: secondTry } = await supabase.from('whatsapp_messages')
+              .update(updateData)
+              .eq('evolution_message_id', wamid)
+              .select('guest_id')
+              .single();
+            updatedMsg = secondTry;
+            if (secondTry) console.log(`[Webhook] Retry SUCCESS for WAMID ${wamid}`);
+            else console.warn(`[Webhook] WAMID ${wamid} still not found after retry. Status lost.`);
+        } else {
+            updatedMsg = firstTry;
+        }
+
         // 2. SYNC: Update the main Guest table for real-time dashboard parity
         if (updatedMsg?.guest_id) {
             console.log(`[Webhook Sync] Propagating ${status} to Guest ${updatedMsg.guest_id}`);
-            await supabase.from('guests').update({ 
-                status: status, // Mirroring the delivery status
-                updated_at: new Date().toISOString()
-            }).eq('id', updatedMsg.guest_id);
+            
+            // --- AUTO-BRIDGE TRIGGER ---
+            if (s.errors?.[0]?.code === 131049) {
+                 // Trigger bridge logic here if needed
+            }
+
+            // FIX: Don't overwrite RSVP status (confirmed/declined) with delivery status
+            const { data: currentGuest } = await supabase.from('guests')
+                .select('rsvp_status, custom_fields')
+                .eq('id', updatedMsg.guest_id)
+                .single();
+
+            if (!['confirmed', 'declined'].includes(currentGuest?.rsvp_status)) {
+                await supabase.from('guests').update({ 
+                    status: status || 'sent', 
+                    custom_fields: { ...(currentGuest?.custom_fields || {}), last_meta_error: errorMsg },
+                    updated_at: new Date().toISOString()
+                }).eq('id', updatedMsg.guest_id);
+            } else {
+                // Only update the timestamp and error info, don't touch status
+                await supabase.from('guests').update({ 
+                    custom_fields: { ...(currentGuest?.custom_fields || {}), last_meta_error: errorMsg },
+                    updated_at: new Date().toISOString()
+                }).eq('id', updatedMsg.guest_id);
+            }
         }
       }
 
@@ -129,18 +175,180 @@ export const handler = async (event) => {
 
         // A. Filter Message Type
         const analyzeButton = (text) => {
-          const t = (text || '').trim().replace(/[إأآا]/g, 'ا'); // Normalize Alifs
+          console.log(`[Webhook] Analyzing button text: "${text}"`);
+          const t = (text || '').trim()
+            .replace(/[إأآا]/g, 'ا')
+            .replace(/[ىيئ]/g, 'ي') // Normalize all YAs and Hamza-on-Ya
+            .replace(/\s+/g, '');  // Remove spaces
           
-          const confirmWords = ['تاكيد الحضور', 'نعم', 'ابشر', 'تم', 'اكد', 'CONFIRM', 'YES', 'OK', '1', 'تاكيد'];
-          const declineWords = ['اعتذار عن الحضور', 'اعتذر عن الحضور', 'اعتذر', 'اعتذار', 'لا استطيع', 'آسف', 'DECLINE', 'NO', 'SORRY', '2'];
+          console.log(`[Webhook] Normalized text: "${t}"`);
+
+          const confirmWords = ['تاكيدالحضور', 'ابشر', 'اكد', 'CONFIRM', 'ACCEPT', 'تاكيد'];
+          const declineWords = ['اعتذارعنالحضور', 'اعتذر', 'اعتذار', 'لااستطيع', 'اسف', 'DECLINE', 'NO', 'SORRY'];
           
+          // Exact match for short words to avoid bridge collisions
+          if (t === 'نعم' || t === 'تم' || t === 'اكد' || t === 'ok' || t === 'yes') return 'confirmed';
+          if (t === 'لا' || t === 'اعتذر') return 'declined';
+
           if (confirmWords.some(w => t.includes(w) || t.toUpperCase() === w)) return 'confirmed';
           if (declineWords.some(w => t.includes(w) || t.toUpperCase() === w)) return 'declined';
           return null;
         };
 
+        // ═══════════════════════════════════════════════════════════════
+        // 🌉 STEP 1: BRIDGE CHECK FIRST (before any RSVP logic)
+        // Meta sends template button replies as message.type='button'
+        // Bridge button text contains "التفاصيل" or "ارسل"
+        // RSVP buttons contain "تأكيد الحضور" or "اعتذار عن الحضور"
+        // ═══════════════════════════════════════════════════════════════
+        let btnText = '';
         if (message.type === 'button') {
-          status = analyzeButton(message.button.text || message.button.payload);
+          btnText = message.button?.text || message.button?.payload || '';
+        } else if (message.interactive?.button_reply) {
+          btnText = message.interactive.button_reply.title || message.interactive.button_reply.id || '';
+        }
+
+        const isBridgeButton = btnText.includes('التفاصيل') || btnText.includes('ارسل') || btnText.includes('أرسل');
+
+        if (isBridgeButton) {
+            console.log(`[Bridge Webhook] 🌉 Guest ${from} pressed bridge button: "${btnText}". Context: ${contextId}`);
+            
+            let stashedGuest = null;
+
+            // 🎯 PHASE 1: PRECISION MATCHING VIA BRIDGE MESSAGE CONTEXT
+            if (contextId) {
+                const { data: bridgeMsg } = await supabase
+                    .from('whatsapp_messages')
+                    .select('guest_id, event_id')
+                    .eq('evolution_message_id', contextId)
+                    .single();
+                
+                if (bridgeMsg) {
+                    const { data: g } = await supabase
+                        .from('guests')
+                        .select('*, events(*)')
+                        .eq('id', bridgeMsg.guest_id)
+                        .single();
+                    if (g?.pending_marketing_data) {
+                        stashedGuest = g;
+                        console.log(`[Bridge Precision] SUCCESS! Matched via context to ${stashedGuest.name} in event ${stashedGuest.event_id}`);
+                    }
+                }
+            }
+
+            // 🔍 PHASE 2: FALLBACK TO SMART PHONE SEARCH (If context match fails)
+            if (!stashedGuest) {
+                console.log(`[Bridge Fallback] Searching via smart phone search...`);
+                const { data: stashedGuests } = await supabase
+                    .from('guests')
+                    .select('*, events(*)')
+                    .ilike('phone', `%${from.slice(-9)}`)
+                    .not('pending_marketing_data', 'is', null)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+                
+                if (stashedGuests && stashedGuests.length > 0) {
+                    // Prioritize the one that has a card_image_url
+                    stashedGuest = stashedGuests.find(g => g.card_image_url) || stashedGuests[0];
+                    console.log(`[Bridge Smart Match] Picked ${stashedGuest.name} (Has Card: ${!!stashedGuest.card_image_url})`);
+                }
+            }
+
+            if (stashedGuest?.pending_marketing_data) {
+                console.log(`[Bridge Webhook] 🚀 Re-triggering invitation for ${stashedGuest.name}`);
+                
+                const metaUrl = `https://graph.facebook.com/v21.0/1031606736708015/messages`;
+                const metaToken = 'EAAV4hiaLibsBRIZBfcKbHswSgZAZA8yxn9wcjAn3fZBO3FsPIEkqY4O1IHkiGcKMAWFTZAm4M0CsfaCGX8fUyCbGSdVbYq6gW0a5VGgRdAsRZA0yTB2ZCc6cFQ796eKOVe6DmU34UW25jBYMnGFm91fSGIMO6bXWZC3SkSKswH0YZBK0tgfN2Er2z7iAvAK75ZAdUtAukesvmyOb9Rrbb1pQiRDpQITe1zBTkjuWRG';
+
+                // 🏗️ RECONSTRUCT PAYLOAD FOR MAXIMUM STABILITY
+                // We use the GENERAL image for Step 2 as requested by the user
+                const eventSettings = stashedGuest.events?.settings || {};
+                const imageUrl = eventSettings.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
+                const groomName = stashedGuest.events?.groom_name || eventSettings.groom_name || 'العريس';
+                const brideName = stashedGuest.events?.bride_name || eventSettings.bride_name || 'العروس';
+                const eventDate = stashedGuest.events?.date || 'قريباً';
+                const eventLocation = stashedGuest.events?.location || 'الموقع';
+
+                const finalPayload = {
+                    messaging_product: 'whatsapp',
+                    to: from,
+                    type: 'template',
+                    template: {
+                        name: 'get_update',
+                        language: { code: 'ar' },
+                        components: [
+                            { 
+                                type: 'header', 
+                                parameters: [{ type: 'image', image: { link: imageUrl } }] 
+                            },
+                            {
+                                type: 'body',
+                                parameters: [
+                                    { type: 'text', parameter_name: 'guest_name', text: String(stashedGuest.name || 'ضيفنا').trim() },
+                                    { type: 'text', parameter_name: 'groom_name', text: groomName },
+                                    { type: 'text', parameter_name: 'bride_name', text: brideName },
+                                    { type: 'text', parameter_name: 'event_date', text: eventDate },
+                                    { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                                ]
+                            },
+                            { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
+                            { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] },
+                            { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(stashedGuest.events?.location_maps_url || eventLocation || 'قاعة الاحتفالات') }] }
+                        ]
+                    }
+                };
+
+                const bRes = await fetch(metaUrl, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${metaToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(finalPayload)
+                });
+
+                const bData = await bRes.json().catch(() => ({}));
+
+                // 📝 LOG THE RESULT TO DB FOR FORENSICS
+                await supabase.from('webhook_debug_logs').insert([{
+                    payload: {
+                        bridge_action: 're_send_attempt_v2',
+                        guest_name: stashedGuest.name,
+                        phone: from,
+                        status: bRes.status,
+                        response: bData,
+                        payload_sent: finalPayload
+                    }
+                }]);
+
+                if (bRes.ok) {
+                    await supabase.from('guests').update({ status: 'sent', pending_marketing_data: null }).eq('id', stashedGuest.id);
+                    
+                    // LOG the actual invitation
+                    await supabase.from('whatsapp_messages').insert([{
+                        guest_id: stashedGuest.id,
+                        event_id: stashedGuest.event_id,
+                        phone: from,
+                        evolution_message_id: bData.messages?.[0]?.id,
+                        message_phase: 'invitation',
+                        message_text: 'دعوة رسمية (بعد الجسر) - نظام مستقر',
+                        status: 'sent',
+                        delivery_status: 'sent'
+                    }]);
+                    
+                    console.log(`[Bridge Webhook] ✅ Marketing sent and logged for ${stashedGuest.name}`);
+                } else {
+                    console.error(`[Bridge Webhook] ❌ Re-send failed for ${stashedGuest.name}:`, JSON.stringify(bData));
+                    await supabase.from('guests').update({ status: 'bridge_failed' }).eq('id', stashedGuest.id);
+                }
+            } else {
+                console.warn(`[Bridge Webhook] ⚠️ No stashed payload found for phone ${from}`);
+            }
+            return { statusCode: 200, body: 'OK' }; // STOP HERE for bridge buttons
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // 🗳️ STEP 2: RSVP HANDLING (only if NOT a bridge button)
+        // ═══════════════════════════════════════════════════════════════
+        if (message.type === 'button') {
+          status = analyzeButton(message.button?.text || message.button?.payload);
           if (status) await handleRSVP(from, status, contextId);
         } 
         else if (message.interactive?.button_reply) {
@@ -190,20 +398,22 @@ async function handleRSVP(phone, status, contextId = null) {
 
   // 2. PHASE 2: FALLBACK TO PHONE + EVENT MATCHING (If context missing or not found)
   if (!targetGuestId) {
-    console.log(`[Logic] Falling back to phone matching for suffix ${phoneSuffix}`);
+    console.log(`[Logic] Falling back to smart phone matching for suffix ${phoneSuffix}`);
     // Match by phone suffix to handle 05, +966, etc.
-    const { data: guestMatch } = await supabase
+    // We fetch multiple records to find the BEST match (prioritizing the one with a personal card)
+    const { data: guestMatches } = await supabase
       .from('guests')
-      .select('id, event_id')
+      .select('id, event_id, card_image_url, created_at')
       .ilike('phone', `%${phoneSuffix}`)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(10);
 
-    if (guestMatch) {
-      targetGuestId = guestMatch.id;
-      targetEventId = guestMatch.event_id;
-      console.log(`[Fallback Match] Found Guest ID: ${targetGuestId}`);
+    if (guestMatches && guestMatches.length > 0) {
+      // 🥇 First priority: Most recent guest WITH a personalized card image
+      const bestMatch = guestMatches.find(g => g.card_image_url) || guestMatches[0];
+      targetGuestId = bestMatch.id;
+      targetEventId = bestMatch.event_id;
+      console.log(`[Smart Match] Found Guest ID: ${targetGuestId} (Has Card: ${!!bestMatch.card_image_url})`);
     }
   }
 
@@ -217,10 +427,18 @@ async function handleRSVP(phone, status, contextId = null) {
   
   const { data: guest } = await supabase.from('guests').select('*, events(name)').eq('id', targetGuestId).single();
   
+  // --- DEDUPLICATION GUARD ---
+  // Allow re-processing 'confirmed' status to let users re-request their cards if they lost them
+  // This also enables repeated testing on the same guest
+  if (guest?.rsvp_status === status && status !== 'confirmed') {
+    console.log(`[Webhook] Duplicate RSVP status (${status}) for guest ${targetGuestId}. Ignoring.`);
+    return;
+  }
+  
+  // Update statuses and ensure synchronization
   await supabase.from('guests').update({ 
     rsvp_status: status,
-    // Keep 'status' in sync if business logic uses it
-    status: status,
+    whatsapp_rsvp_status: status,
     updated_at: new Date().toISOString()
   }).eq('id', targetGuestId);
 
@@ -228,32 +446,50 @@ async function handleRSVP(phone, status, contextId = null) {
   const eventName = guest?.events?.name || 'الحفل';
   const guestName = guest?.name || 'ضيفنا الكريم';
 
-  if (status === 'confirmed') {
-    if (guest?.card_image_url) {
+    if (status === 'confirmed') {
+        const { data: eventData } = await supabase.from('events').select('settings, meta_media_id').eq('id', targetEventId).single();
+        
+        // Priority: 1. Personalized Card -> 2. Event Media ID -> 3. Global Image Link -> 4. Demo Fallback
+        let cardUrl = guest?.card_image_url;
+        const metaMediaId = eventData?.meta_media_id || eventData?.settings?.meta_media_id;
+        const globalImageUrl = eventData?.settings?.global_invite_image_url;
+
         const caption = `أهلاً وسهلاً بك يا ${guestName}! 🎉\nيسعدنا تأكيد حضورك في ${eventName}.\n\nتفضل كرت الدخول الشخصي الخاص بك 👇`;
-        await sendMetaImage(phone, guest.card_image_url, caption, targetEventId, targetGuestId);
+        
+        if (cardUrl) {
+            // Personalized card (usually a link from storage)
+            await sendMetaImage(phone, cardUrl, null, caption, targetEventId, targetGuestId);
+        } else if (metaMediaId) {
+            // Stabilized Event Media ID (Best for delivery)
+            await sendMetaImage(phone, null, metaMediaId, caption, targetEventId, targetGuestId);
+        } else if (globalImageUrl) {
+            // Global Event Image Link
+            await sendMetaImage(phone, globalImageUrl, null, caption, targetEventId, targetGuestId);
+        } else {
+            // Absolute Fallback
+            const fallback = `https://gxunxhzjqclddoobxvpz.supabase.co/storage/v1/object/public/invitation-cards/0900ecaf-3d22-4f3b-bc01-9df1ef75f9f7/09b29ea0-47a9-4004-aa71-45d67696b7cc.jpg`;
+            await sendMetaImage(phone, fallback, null, caption, targetEventId, targetGuestId);
+        }
     } else {
-        await sendMetaText(phone, `شكراً لك يا ${guestName}! تم تأكيد حضورك في ${eventName}. سنرسل لك كرت الدخول قريباً.`, targetEventId, targetGuestId);
+        const declineText = `نعتذر لعدم تمكنك من الحضور يا ${guestName}. نراك في مناسبات قادمة بإذن الله وحفظه. 🌹`;
+        await sendMetaText(phone, declineText, targetEventId, targetGuestId);
     }
-  } else {
-    // Explicit Response for Declined (M3tazer)
-    const declineText = `نعتذر لعدم تمكنك من الحضور يا ${guestName}. نراك في مناسبات قادمة بإذن الله وحفظه. 🌹`;
-    await sendMetaText(phone, declineText, targetEventId, targetGuestId);
-  }
 }
 
-async function sendMetaImage(to, imageUrl, caption, eventId, guestId) {
+async function sendMetaImage(to, imageUrl, mediaId, caption, eventId, guestId) {
   try {
-    const res = await fetch(`https://graph.facebook.com/${META_VERSION}/${META_PHONE_NUMBER_ID}/messages`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${META_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const messagePayload = {
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to,
         type: "image",
-        image: { link: imageUrl, caption }
-      })
+        image: mediaId ? { id: mediaId, caption } : { link: imageUrl, caption }
+    };
+
+    const res = await fetch(`https://graph.facebook.com/${META_VERSION}/${META_PHONE_NUMBER_ID}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${META_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(messagePayload)
     });
     
     if (res.ok) {
@@ -265,7 +501,7 @@ async function sendMetaImage(to, imageUrl, caption, eventId, guestId) {
         evolution_message_id: resp.messages?.[0]?.id,
         message_phase: 'qr_code',
         message_text: `Auto-QR Response: ${caption}`,
-        image_url: imageUrl,
+        image_url: imageUrl || `MediaID: ${mediaId}`,
         status: 'sent',
         delivery_status: 'sent'
       }]);

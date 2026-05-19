@@ -192,7 +192,9 @@ export const handler = async (eventReq, context) => {
                     const { error: insertError } = await supabase.from('whatsapp_messages').insert([{
                         guest_id: guest.id,
                         event_id: eventId,
+                        phone: phone,
                         status: 'sent',
+                        delivery_status: 'sent',
                         evolution_message_id: metaData.messages?.[0]?.id,
                         message_phase: isReminder ? 'reminder' : (isQR ? 'qr_code' : 'invitation')
                     }]);

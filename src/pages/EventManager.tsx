@@ -181,8 +181,8 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
 
     return (
         <div className="space-y-8 font-kufi" dir="rtl">
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-lony-navy font-amiri">{initialEvent ? 'تعديل الحدث' : 'إعداد الحدث الجديد'}</h1>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <h1 className="text-2xl md:text-3xl font-bold text-lony-navy font-amiri">{initialEvent ? 'تعديل الحدث' : 'إعداد الحدث الجديد'}</h1>
             </div>
 
             {message && (
@@ -238,7 +238,7 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                                     />
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-gray-600">اسم العريس</label>
                                     <input
@@ -275,7 +275,7 @@ const EventManager: React.FC<EventManagerProps> = ({ initialEvent, onSuccess }) 
                             </div>
 
                             {features.qr_time_restricted && (
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-gray-600">وقت تفعيل الدخول (Activation)</label>
                                         <div className="relative">

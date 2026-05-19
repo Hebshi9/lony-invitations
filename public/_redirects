@@ -1,5 +1,14 @@
+# Proxy to Contabo VPS
+/api/vps/*         http://62.171.172.76:3001/api/:splat               200!
 /api/remote-whatsapp/*  http://62.171.172.76:3001/api/whatsapp/:splat  200!
 /api/remote-sales/*     http://62.171.172.76:3002/:splat               200!
-/stats/:id              /admin-stats.html?eid=:id                       200
-/v/*                    /guest-view.html                                200
-/*                      /index.html                                     200
+
+# Netlify Functions
+/api/*             /.netlify/functions/:splat                          200
+
+# Static pages
+/stats/:id         /admin-stats.html?eid=:id                          200
+/v/*               /guest-view.html                                   200
+
+# SPA fallback (must be last)
+/*                 /index.html                                        200

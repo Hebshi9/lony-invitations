@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { hasFeature } from '../lib/features';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2, Search, Plus, Edit2, Layers, Filter } from 'lucide-react';
+import { Settings2, Sparkles, Palette, Save, Type, ImageIcon, FileDown, CheckCircle, RefreshCw, Eraser, AlignLeft, AlignCenter, AlignRight, Smartphone, Download, Move, ChevronRight, ChevronLeft, Mic, MicOff, Wand2, QrCode as QrCodeIcon, Trash2, Search, Plus, Edit2, Layers, Filter, Link as LinkIcon, Info } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import * as QRCode from 'qrcode';
 import JSZip from 'jszip';
@@ -89,6 +89,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 function UnifiedInvitationStudioContent() {
     // --- State ---
     const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+    const [eventsList, setEventsList] = useState<{ id: string, name: string, date: string, features?: any, host_pin?: string }[]>([]);
     const [guests, setGuests] = useState<Guest[]>([]);
     const [currentGuestIndex, setCurrentGuestIndex] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -158,6 +159,22 @@ function UnifiedInvitationStudioContent() {
     const [quickAIText, setQuickAIText] = useState('');
     const [parsedGuests, setParsedGuests] = useState<{name: string, companions: number}[]>([]);
     const [isAnalyzingQuick, setIsAnalyzingQuick] = useState(false);
+
+    // --- SMART EVENT PICKER STATE ---
+    const [eventSearchQuery, setEventSearchQuery] = useState('');
+    const [isEventPickerOpen, setIsEventPickerOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // --- State for Events (Moved up to prevent ReferenceError) ---
+    const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+    // --- Refs for Auto-Save (Moved up for consistency) ---
+    const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const isInitialLoad = useRef(true);
+
+    const filteredEvents = eventsList.filter(e => 
+        (e.name || '').toLowerCase().includes(eventSearchQuery.toLowerCase())
+    );
 
 
     // Refs
@@ -289,8 +306,7 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
-    // --- Load Events ---
-    const [eventsList, setEventsList] = useState<{ id: string, name: string, date: string, features?: any, host_pin?: string }[]>([]);
+    // --- Load Events (State moved to top) ---
 
     const getCanvasBlob = (canvas: HTMLCanvasElement): Promise<Blob | null> => {
         return new Promise((resolve) => {
@@ -309,6 +325,59 @@ function UnifiedInvitationStudioContent() {
         });
     };
 
+    // --- Handlers ---
+    const handleEventSelect = async (eventId: string) => {
+        if (!eventId) return;
+        setLoading(true);
+        setSelectedEventId(eventId);
+        
+        try {
+            // 1. Load Guests
+            const { data: guestsData, error: guestsError } = await supabase
+                .from('guests')
+                .select('*')
+                .eq('event_id', eventId)
+                .order('created_at', { ascending: true });
+            
+            if (guestsError) throw guestsError;
+            setGuests(guestsData || []);
+            setCurrentGuestIndex(0);
+
+            // 2. Discover Available Fields
+            if (guestsData && guestsData.length > 0) {
+                const sampleGuest = guestsData[0];
+                const standardFields = ['name', 'table_no', 'category', 'companions_count', 'serial', 'qr_token'];
+                let customFields: string[] = [];
+
+                if (sampleGuest.custom_data && typeof sampleGuest.custom_data === 'object') {
+                    customFields = Object.keys(sampleGuest.custom_data).map(key => "custom_data." + key);
+                }
+
+                setAvailableFields([...standardFields, ...customFields]);
+            }
+
+            // 3. Fetch design for this event
+            const { data: eventFresh } = await supabase.from('events').select('features').eq('id', eventId).single();
+            
+            if (eventFresh?.features?.design_config) {
+                const config = eventFresh.features.design_config;
+                if (config.elements) setElements(config.elements);
+                if (config.backgroundUrl) setBackgroundImage(config.backgroundUrl);
+            } else {
+                // Default design if none exists
+                setElements([
+                    { id: '1', type: 'text', text: '{name}', x: 540, y: 960, fontSize: 60, color: '#000000', align: 'center', fontWeight: 'bold' },
+                    { id: 'qr', type: 'qr', x: 540, y: 1500, size: 200 }
+                ]);
+                setBackgroundImage(null);
+            }
+        } catch (error) {
+            console.error("Error fetching event data:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Wait for canvas render to finish painting
     const waitForRender = (ms = 120) => new Promise(r => setTimeout(r, ms));
 
@@ -317,48 +386,41 @@ function UnifiedInvitationStudioContent() {
             const { data } = await supabase.from('events').select('id, name, date, features, host_pin').order('date', { ascending: false });
             if (data) {
                 setEventsList(data);
-                // Auto-select first event
-                if (data.length > 0) handleEventSelect(data[0].id);
+                
+                // --- CONTEXT PRESERVATION: Check URL first ---
+                const params = new URLSearchParams(window.location.search);
+                const urlEventId = params.get('eventId');
+                
+                if (urlEventId && data.find(e => e.id === urlEventId)) {
+                    handleEventSelect(urlEventId);
+                } else if (data.length > 0) {
+                    handleEventSelect(data[0].id);
+                }
             }
         };
         fetchEvents();
     }, []);
 
-    const handleEventSelect = async (eventId: string) => {
-        setSelectedEventId(eventId);
-        setLoading(true);
-
-        // Load Guests & Discover Fields
-        const { data: guestsData } = await supabase.from('guests').select('*').eq('event_id', eventId);
-        if (guestsData && guestsData.length > 0) {
-            setGuests(guestsData);
-
-            // Discover Fields from First Guest
-            const sampleGuest = guestsData[0];
-            const standardFields = ['name', 'table_no', 'category', 'companions_count', 'serial', 'qr_token'];
-            let customFields: string[] = [];
-
-            if (sampleGuest.custom_data && typeof sampleGuest.custom_data === 'object') {
-                customFields = Object.keys(sampleGuest.custom_data).map(key => "custom_data." + key);
+    // Close picker when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsEventPickerOpen(false);
             }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
-            setAvailableFields([...standardFields, ...customFields]);
+    // Sync state to URL for context preservation
+    useEffect(() => {
+        if (selectedEventId) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('eventId', selectedEventId);
+            window.history.replaceState({}, '', url.toString());
         }
+    }, [selectedEventId]);
 
-        // Load Saved Design from 'features.design_config'
-        // Find existing event name if needed, but we mainly want features
-        // const eventName = eventsList.find(e => e.id === eventId)?.name;
-        // We might need to fetch fresh if eventsList is stale, but let's try logic:
-        const { data: eventFresh } = await supabase.from('events').select('features, host_pin').eq('id', eventId).single();
-
-        if (eventFresh?.features?.design_config) {
-            const config = eventFresh.features.design_config;
-            if (config.elements) setElements(config.elements);
-            if (config.backgroundUrl) setBackgroundImage(config.backgroundUrl);
-        }
-
-        setLoading(false);
-    };
 
     // --- Voice Recognition ---
     const toggleListening = () => {
@@ -548,8 +610,7 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
-    // --- Save Logic ---
-    const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    // --- Save Logic (State moved to top) ---
 
     const saveDesign = async (silent: boolean = false) => {
         if (!selectedEventId) {
@@ -587,16 +648,7 @@ function UnifiedInvitationStudioContent() {
                     // Update local state with the URL instead of base64
                     setBackgroundImage(publicUrl);
                 } else {
-                    // Fallback: try 'invitations' bucket
-                    const { error: uploadError2 } = await supabase.storage
-                        .from('invitations')
-                        .upload(fileName, blob, { upsert: true, contentType: mime });
-                    if (!uploadError2) {
-                        const { data: { publicUrl } } = supabase.storage.from('invitations').getPublicUrl(fileName);
-                        bgUrlToSave = publicUrl;
-                        setBackgroundImage(publicUrl);
-                    }
-                    // If both fail, save base64 as fallback
+                    console.error("Upload error:", uploadError);
                 }
             }
 
@@ -627,7 +679,9 @@ function UnifiedInvitationStudioContent() {
             if (error) throw error;
 
             setAutoSaveStatus('saved');
-            if (!silent) alert("تم حفظ قالب التصميم بنجاح! سيتم استخدامه لجميع الضيوف.");
+            if (!silent) {
+                alert("✅ تم حفظ قالب التصميم بنجاح!\n\n⚠️ تنبيه هام: يجب عليك الآن الضغط على زر \"تحديث قاعدة البيانات\" في قسم التصدير ليتمكن الضيوف من استلام هذه البطاقة الجديدة.");
+            }
 
             // Reset status after 3 seconds
             setTimeout(() => setAutoSaveStatus('idle'), 3000);
@@ -641,9 +695,7 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
-    // --- Auto-Save: Save design automatically when elements or background change ---
-    const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const isInitialLoad = useRef(true);
+    // --- Auto-Save Effect ---
 
     useEffect(() => {
         // Skip auto-save on initial load
@@ -972,10 +1024,7 @@ function UnifiedInvitationStudioContent() {
                         .upload(fileName, blob, { upsert: true, contentType: 'image/jpeg' });
 
                     if (uploadError) {
-                        const { error: uploadError2 } = await supabase.storage
-                            .from('invitations')
-                            .upload(fileName, blob, { upsert: true, contentType: 'image/jpeg' });
-                        if (uploadError2) throw new Error("خطأ في الرفع: " + uploadError.message);
+                        throw new Error("خطأ في رفع البطاقة: " + uploadError.message);
                     }
 
                     // 4. Collect for batch update
@@ -1027,7 +1076,7 @@ function UnifiedInvitationStudioContent() {
         } catch (error: any) {
             console.error("Publish Error:", error);
             setProgress(p => ({ ...p, lastError: "فشل حرج: " + error.message }));
-            alert("حدث خطأ أثناء التحديث: " + error.message);
+            alert("حدث خطأ أثناء التحديث: " + error.message + " | تأكد من أنك قمت برفع خلفية أولاً.");
         } finally {
             setSaving(false);
             renderCanvas();
@@ -1157,7 +1206,6 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
-    // --- Canvas Rendering ---
     // --- Helper for Text Replacement ---
     const replacePlaceholders = (text: string, guest: any) => {
         if (!text || !guest) return text;
@@ -1190,13 +1238,6 @@ function UnifiedInvitationStudioContent() {
             return guest[key] !== undefined && guest[key] !== null ? String(guest[key]) : '';
         });
     };
-
-    // --- Canvas Rendering ---
-    useEffect(() => {
-        if (!generating && !saving) {
-            renderCanvas();
-        }
-    }, [elements, currentGuestIndex, backgroundImage, guests, generating, saving]);
 
     const renderCanvas = async (overrideGuest?: Guest, isExport: boolean = false, overrideSerial?: number) => {
         const canvas = canvasRef.current;
@@ -1396,6 +1437,13 @@ function UnifiedInvitationStudioContent() {
         }
     };
 
+    // --- Canvas Rendering Effect ---
+    useEffect(() => {
+        if (!generating && !saving) {
+            renderCanvas();
+        }
+    }, [elements, currentGuestIndex, backgroundImage, guests, generating, saving]);
+
     // --- Interactions ---
     // --- Interactions ---
     const handlePointerDown = (e: React.PointerEvent) => {
@@ -1526,10 +1574,10 @@ function UnifiedInvitationStudioContent() {
     };
 
     return (
-        <div className="flex h-screen bg-gray-100 p-4 gap-4" dir="rtl">
+        <div className="flex flex-col xl:flex-row h-full xl:h-[calc(100vh-2rem)] bg-gray-100 p-2 md:p-4 gap-4 overflow-x-hidden" dir="rtl">
 
-            {/* 1. Sidebar */}
-            <div className="w-[400px] flex flex-col gap-4 h-full">
+            {/* 1. Sidebar (Tools) */}
+            <div className="w-full xl:w-[400px] flex flex-col gap-4 shrink-0 overflow-y-auto custom-scrollbar pb-20 xl:pb-0">
 
                 {/* Header & Event Select */}
                 <Card className="shadow-md border-l-4 border-lony-gold">
@@ -1538,13 +1586,57 @@ function UnifiedInvitationStudioContent() {
                             <span>استوديو التصميم</span>
                             {saving && <span className="text-xs text-blue-500 animate-pulse">جاري الحفظ...</span>}
                         </CardTitle>
-                        <select
-                            className="w-full mt-2 p-2 text-sm border rounded bg-white"
-                            onChange={(e) => handleEventSelect(e.target.value)}
-                            value={selectedEventId || ''}
-                        >
-                            {eventsList.map(ev => <option key={ev.id} value={ev.id}>{ev.name} ({ev.date})</option>)}
-                        </select>
+                        <div className="relative mt-2" ref={dropdownRef}>
+                            <div 
+                                onClick={() => setIsEventPickerOpen(!isEventPickerOpen)}
+                                className="w-full p-2.5 text-xs font-black bg-white border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:border-indigo-300 transition-all shadow-sm"
+                            >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                    <span className="truncate">{eventsList.find(e => e.id === selectedEventId)?.name || 'اختر المناسبة...'}</span>
+                                </div>
+                                <Search className="w-3 h-3 text-slate-400" />
+                            </div>
+
+                            {isEventPickerOpen && (
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[100] p-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className="relative mb-3">
+                                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                                        <input 
+                                            type="text"
+                                            placeholder="ابحث عن مناسبة..."
+                                            value={eventSearchQuery}
+                                            onChange={(e) => setEventSearchQuery(e.target.value)}
+                                            className="w-full bg-slate-50 border-none rounded-xl pr-10 pl-4 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto space-y-1 custom-scrollbar">
+                                        {filteredEvents.length > 0 ? filteredEvents.map(ev => (
+                                            <div 
+                                                key={ev.id}
+                                                onClick={() => {
+                                                    handleEventSelect(ev.id);
+                                                    setIsEventPickerOpen(false);
+                                                }}
+                                                className={`p-3 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center justify-between group ${selectedEventId === ev.id ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                                            >
+                                                <div className="flex flex-col">
+                                                    <span>{ev.name}</span>
+                                                    <span className="text-[9px] opacity-40">{ev.date}</span>
+                                                </div>
+                                                {selectedEventId === ev.id && <CheckCircle className="w-3 h-3" />}
+                                                <ChevronLeft className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ${selectedEventId === ev.id ? 'hidden' : ''}`} />
+                                            </div>
+                                        )) : (
+                                            <div className="p-8 text-center text-[10px] text-slate-400 font-bold italic">
+                                                لا يوجد نتائج للبحث..
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </CardHeader>
                     <CardContent className="space-y-3 pb-4">
                         <div className="grid grid-cols-2 gap-2">
@@ -2247,10 +2339,10 @@ function UnifiedInvitationStudioContent() {
             </div>
 
 
-            {/* Export Panel - Floating Right */}
+            {/* Export Panel - Responsive Floating/Overlay */}
             {
                 mode === 'export' && (
-                    <div className="absolute top-20 right-80 w-96 bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-white/20 p-6 overflow-y-auto max-h-[85vh] z-50 animate-in slide-in-from-right-10 duration-200">
+                    <div className="fixed inset-0 xl:inset-auto xl:top-20 xl:right-[420px] w-full xl:w-96 bg-white/95 backdrop-blur xl:shadow-2xl xl:rounded-2xl border-t xl:border border-white/20 p-4 md:p-6 overflow-y-auto h-full xl:max-h-[85vh] z-[60] animate-in slide-in-from-right-10 duration-200">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="font-bold text-gray-800 flex items-center gap-2 text-lg">
                                 <FileDown className="w-6 h-6 text-purple-600" />

@@ -66,6 +66,13 @@ const AdminEventsPanel: React.FC = () => {
             return;
         }
 
+        // إدخال رمز الأمان للحذف (لحماية البيانات من الحذف الخاطئ)
+        const secretCode = window.prompt("أدخل رمز الأمان لإتمام عملية الحذف:");
+        if (secretCode !== "3801") {
+            alert("رمز الأمان خاطئ. تم إلغاء عملية الحذف.");
+            return;
+        }
+
         try {
             setLoading(true);
             const { error } = await supabase
@@ -90,13 +97,13 @@ const AdminEventsPanel: React.FC = () => {
 
     return (
         <div className="space-y-6 font-kufi" dir="rtl">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-lony-navy font-amiri">مركز العمليات (Events Panel)</h1>
+                    <h1 className="text-2xl md:text-3xl font-bold text-lony-navy font-amiri">مركز العمليات (Events Panel)</h1>
                     <p className="text-gray-500 text-sm mt-1">إدارة شاملة لجميع المناسبات والتحكم بها</p>
                 </div>
                 {!editingEvent && (
-                    <Button onClick={() => setEditingEvent('new')} className="bg-lony-gold hover:bg-lony-gold/90 text-lony-navy">
+                    <Button onClick={() => setEditingEvent('new')} className="w-full md:w-auto bg-lony-gold hover:bg-lony-gold/90 text-lony-navy">
                         + إضافة مناسبة جديدة
                     </Button>
                 )}

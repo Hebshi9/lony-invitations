@@ -18,10 +18,10 @@ interface RSVPStats {
     total_sent: number;
     total_delivered: number;
     total_read: number;
-    total_confirmed: number;
-    total_declined: number;
-    total_maybe: number;
-    total_no_response: number;
+    rsvp_confirmed: number;
+    rsvp_declined: number;
+    rsvp_maybe: number;
+    rsvp_pending: number;
 }
 
 export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
@@ -65,7 +65,7 @@ export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
             case 'declined':
                 return guests.filter(g => g.whatsapp_rsvp_status === 'declined');
             case 'pending':
-                return guests.filter(g => !g.whatsapp_rsvp_status && g.delivery_status === 'read');
+                return guests.filter(g => !g.whatsapp_rsvp_status && (g.delivery_status === 'read' || g.delivery_status === 'delivered' || g.delivery_status === 'sent'));
             default:
                 return guests;
         }
@@ -110,11 +110,11 @@ export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
                                 <div className="text-sm text-gray-600 mt-1">تم التسليم</div>
                             </div>
                             <div className="bg-emerald-50 p-4 rounded-lg text-center border-2 border-emerald-300">
-                                <div className="text-3xl font-bold text-emerald-600">{stats.total_confirmed}</div>
+                                <div className="text-3xl font-bold text-emerald-600">{stats.rsvp_confirmed}</div>
                                 <div className="text-sm text-gray-600 mt-1">✅ أكدوا الحضور</div>
                             </div>
                             <div className="bg-red-50 p-4 rounded-lg text-center border-2 border-red-300">
-                                <div className="text-3xl font-bold text-red-600">{stats.total_declined}</div>
+                                <div className="text-3xl font-bold text-red-600">{stats.rsvp_declined}</div>
                                 <div className="text-sm text-gray-600 mt-1">❌ اعتذروا</div>
                             </div>
                         </div>
@@ -140,7 +140,7 @@ export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
                                 size="sm"
                                 className="bg-green-600 hover:bg-green-700"
                             >
-                                أكدوا ({stats?.total_confirmed || 0})
+                                أكدوا ({stats?.rsvp_confirmed || 0})
                             </Button>
                             <Button
                                 onClick={() => setFilter('declined')}
@@ -148,7 +148,7 @@ export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
                                 size="sm"
                                 className="bg-red-600 hover:bg-red-700"
                             >
-                                اعتذروا ({stats?.total_declined || 0})
+                                اعتذروا ({stats?.rsvp_declined || 0})
                             </Button>
                             <Button
                                 onClick={() => setFilter('pending')}
@@ -156,7 +156,7 @@ export default function ClientWhatsAppView({ eventId }: { eventId: string }) {
                                 size="sm"
                                 className="bg-gray-600 hover:bg-gray-700"
                             >
-                                لم يردوا ({stats?.total_no_response || 0})
+                                لم يردوا ({stats?.rsvp_pending || 0})
                             </Button>
                         </div>
                     </div>

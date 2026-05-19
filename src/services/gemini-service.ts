@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getOpenAIClient } from './openaiService';
 
 // Initialize Gemini
 const API_KEY = typeof import.meta !== 'undefined' && import.meta.env
@@ -11,7 +12,8 @@ class GeminiService {
     private model: any;
 
     constructor() {
-        this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        // Updated to a stable model since user reported AI is not working
+        this.model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     }
 
     /**
@@ -334,6 +336,95 @@ class GeminiService {
         } catch (error) {
             console.error('[Gemini] Extraction failed:', error);
             return {};
+        }
+    }
+
+    /**
+     * Parse Business Entry (AI Magic Input)
+     * Extracts structured order data from natural language text with Saudi Dialect awareness
+     */
+    async parseBusinessEntry(text: string): Promise<{
+        client_name: string;
+        client_phone: string;
+        service_type: string;
+        total_price: number;
+        deposit_amount: number;
+        designer_fee: number;
+        follow_up_date: string;
+        expected_delivery_date: string;
+        bank_account: string;
+        estimated_marketing_cost: number;
+    } | null> {
+        try {
+            const prompt = `
+أنت مساعد مالي ذكي متخصص في إدارة مبيعات شركة "لوني" (Lony) لدعوات الزفاف الفاخرة.
+حلل النص التالي (باللهجة السعودية أو الفصحى) واستخرج البيانات المالية بدقة احترافية:
+
+"${text}"
+
+المطلوب استخراج:
+1. client_name: اسم العميل (مثال: ناصر القحطاني)
+2. client_phone: رقم الجوال (مثال: 0569667344)
+3. service_type: نوع الخدمة. يجب أن تصنفها بدقة لإحدى هذه الفئات: ("تصميم فقط", "تصميم وباركود", "بكج كامل", "إدارة بوابة", "رسائل واتساب", "فلتر سناب شات", "سيرة ذاتية", "لينكد ان", "أخرى").
+4. total_price: المبلغ الإجمالي المتفق عليه (رقماً فقط)
+5. deposit_amount: مبلغ العربون/الدفعة الأولى المدفوعة (رقماً فقط)
+6. designer_fee: تكلفة المصممة إن وجدت (رقماً فقط)
+7. follow_up_date: تاريخ المتابعة القادم (بصيغة YYYY-MM-DD)
+8. expected_delivery_date: تاريخ التسليم المتوقع (بصيغة YYYY-MM-DD) - إذا لم يذكر، اقترح تاريخاً بعد 3 أيام من اليوم.
+9. bank_account: حساب الدفع البنكي. يجب أن تصنفه لإحدى هذه البنوك أو المحافظ السعودية: ("الراجحي", "الأهلي", "الإنماء", "الأول", "الرياض", "البلاد", "الاستثمار", "الفرنسي", "الجزيرة", "اس تي سي باي", "يورباي", "موبايلي باي", "الانماء باي", "نقدي", "غير محدد").
+10. estimated_marketing_cost: تكلفة العميل التسويقية التقديرية (استنتجها كنسبة 10% من الإجمالي أو إذا ذكرت صراحة).
+
+الرد يجب أن يكون JSON فقط بهذا الشكل:
+{
+  "client_name": "",
+  "client_phone": "",
+  "service_type": "بكج كامل",
+  "total_price": 0,
+  "deposit_amount": 0,
+  "designer_fee": 0,
+  "follow_up_date": "",
+  "expected_delivery_date": "",
+  "bank_account": "",
+  "estimated_marketing_cost": 0
+}
+
+تعليمات صارمة:
+- افهم الكلمات السعودية: (عربون = deposit_amount، باقي = الفرق بين الإجمالي والعربون، حجزت = service_type).
+- حول كل الأرقام إلى قيم عددية (Numbers).
+- لا تضف أي نص أو شرح خارج الـ JSON.
+            `;
+
+            try {
+                // Using OpenAI GPT-4o directly as requested by the user
+                const openai = getOpenAIClient();
+                const response = await openai.chat.completions.create({
+                    model: "gpt-4o",
+                    messages: [
+                        {
+                            role: "system",
+                            content: "أنت مساعد مالي ذكي. قم بإرجاع الرد بصيغة JSON فقط استناداً إلى التعليمات التي يطلبها المستخدم، دون أي نص إضافي."
+                        },
+                        {
+                            role: "user",
+                            content: prompt
+                        }
+                    ],
+                    response_format: { type: "json_object" }
+                });
+                
+                const content = response.choices[0].message.content;
+                if (content) {
+                    const result = JSON.parse(content);
+                    return result;
+                }
+            } catch (openAiError) {
+                console.error('[OpenAI] Business entry parsing failed:', openAiError);
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('[Gemini] parseBusinessEntry failed:', error);
+            return null;
         }
     }
 

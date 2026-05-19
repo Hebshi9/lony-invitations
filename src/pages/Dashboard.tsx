@@ -80,13 +80,13 @@ const Dashboard: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6" dir="rtl">
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-gray-900 text-right">لوحة التحكم</h1>
-                <div className="flex gap-2 bg-white p-1 rounded-lg border shadow-sm overflow-x-auto">
+        <div className="space-y-4" dir="rtl">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900 text-right">لوحة التحكم</h1>
+                <div className="flex gap-2 bg-white p-1 rounded-lg border shadow-sm overflow-x-auto w-full md:w-auto">
                     <button
                         onClick={() => setActiveTab('overview')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'overview' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'overview' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         <LayoutDashboard className="w-4 h-4" />
@@ -94,7 +94,7 @@ const Dashboard: React.FC = () => {
                     </button>
                     <button
                         onClick={() => setActiveTab('intake')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'intake' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'intake' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         <FileInput className="w-4 h-4" />
@@ -102,7 +102,7 @@ const Dashboard: React.FC = () => {
                     </button>
                     <button
                         onClick={() => setActiveTab('orders')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'orders' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'orders' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         <ShoppingBag className="w-4 h-4" />
@@ -110,7 +110,7 @@ const Dashboard: React.FC = () => {
                     </button>
                     <button
                         onClick={() => setActiveTab('templates')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'templates' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'templates' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         <Palette className="w-4 h-4" />
@@ -120,56 +120,56 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Production Toolbar */}
-            <div className="flex flex-wrap gap-4 border-b pb-6">
-                <Button onClick={() => window.location.href = '/upload-guests'} className="bg-blue-600 hover:bg-blue-700">
-                    <FileInput className="w-4 h-4 ml-2" />
-                    رفع الضيوف (AI)
+            <div className="flex flex-wrap gap-2 border-b pb-4">
+                <Button onClick={() => window.location.href = '/upload-guests'} className="bg-blue-600 hover:bg-blue-700 h-9 px-4 text-xs">
+                    <FileInput className="w-3 h-3 ml-1.5" />
+                    رفع الضيوف
                 </Button>
-                <Button onClick={() => window.location.href = '/studio'} className="bg-purple-600 hover:bg-purple-700">
-                    <Palette className="w-4 h-4 ml-2" />
+                <Button onClick={() => window.location.href = '/studio'} className="bg-purple-600 hover:bg-purple-700 h-9 px-4 text-xs">
+                    <Palette className="w-3 h-3 ml-1.5" />
                     استوديو البطاقات
                 </Button>
-                <Button onClick={() => window.location.href = '/whatsapp-sender'} className="bg-green-600 hover:bg-green-700">
-                    <ShoppingBag className="w-4 h-4 ml-2" />
+                <Button onClick={() => window.location.href = '/whatsapp-sender'} className="bg-green-600 hover:bg-green-700 h-9 px-4 text-xs">
+                    <ShoppingBag className="w-3 h-3 ml-1.5" />
                     إرسال واتساب
                 </Button>
-                <Button onClick={() => window.location.href = '/analytics'} variant="outline">
-                    <LayoutDashboard className="w-4 h-4 ml-2" />
+                <Button onClick={() => window.location.href = '/analytics'} variant="outline" className="h-9 px-4 text-xs">
+                    <LayoutDashboard className="w-3 h-3 ml-1.5" />
                     التقارير
                 </Button>
             </div>
 
             {activeTab === 'overview' && (
-                <div className="space-y-6 animate-in fade-in duration-500">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-4 animate-in fade-in duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">إجمالي الأحداث</CardTitle>
+                            <CardHeader className="p-3 pb-0">
+                                <CardTitle className="text-sm text-right opacity-70">إجمالي الأحداث</CardTitle>
                             </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-blue-600 text-right">
+                            <CardContent className="p-3">
+                                <p className="text-2xl font-black text-blue-600 text-right">
                                     {loading ? '...' : stats.totalEvents}
                                 </p>
                             </CardContent>
                         </Card>
 
                         <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">إجمالي الضيوف</CardTitle>
+                            <CardHeader className="p-3 pb-0">
+                                <CardTitle className="text-sm text-right opacity-70">إجمالي الضيوف</CardTitle>
                             </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-green-600 text-right">
+                            <CardContent className="p-3">
+                                <p className="text-2xl font-black text-green-600 text-right">
                                     {loading ? '...' : stats.totalGuests}
                                 </p>
                             </CardContent>
                         </Card>
 
                         <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg text-right">الدعوات المرسلة</CardTitle>
+                            <CardHeader className="p-3 pb-0">
+                                <CardTitle className="text-sm text-right opacity-70">الدعوات المرسلة</CardTitle>
                             </CardHeader>
-                            <CardContent>
-                                <p className="text-3xl font-bold text-purple-600 text-right">
+                            <CardContent className="p-3">
+                                <p className="text-2xl font-black text-purple-600 text-right">
                                     {loading ? '...' : stats.sentInvitations}
                                 </p>
                             </CardContent>
@@ -177,17 +177,17 @@ const Dashboard: React.FC = () => {
                     </div>
 
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="text-right">الأحداث الأخيرة</CardTitle>
+                        <CardHeader className="p-4 pb-0">
+                            <CardTitle className="text-right text-base">الأحداث الأخيرة</CardTitle>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-4">
                             <div className="overflow-x-auto">
                                 <table className="w-full text-right">
-                                    <thead className="bg-gray-50">
+                                    <thead className="bg-gray-50/50">
                                         <tr>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الحدث</th>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
-                                            <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
+                                            <th className="px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">اسم الحدث</th>
+                                            <th className="px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">التاريخ</th>
+                                            <th className="px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-left">الإجراءات</th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
@@ -201,11 +201,11 @@ const Dashboard: React.FC = () => {
                                             </tr>
                                         ) : (
                                             recentEvents.map((event) => (
-                                                <tr key={event.id}>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.name}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                        <Button size="sm" variant="outline">عرض التفاصيل</Button>
+                                                <tr key={event.id} className="hover:bg-gray-50/50 transition-colors">
+                                                    <td className="px-4 py-2 whitespace-nowrap text-xs font-bold text-gray-900">{event.name}</td>
+                                                    <td className="px-4 py-2 whitespace-nowrap text-[10px] text-gray-500">{event.date}</td>
+                                                    <td className="px-4 py-2 whitespace-nowrap text-xs text-left">
+                                                        <Button size="sm" variant="outline" className="h-7 text-[10px] px-3">عرض</Button>
                                                     </td>
                                                 </tr>
                                             ))

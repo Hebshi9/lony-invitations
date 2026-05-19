@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 // Prevents crash on initial load if key is missing/invalid
 let openaiInstance: OpenAI | null = null;
 
-const getOpenAIClient = () => {
+export const getOpenAIClient = () => {
     if (openaiInstance) return openaiInstance;
 
     // Try VITE_ prefix first (frontend), then fallback (rarely works in vite client but safe to check)

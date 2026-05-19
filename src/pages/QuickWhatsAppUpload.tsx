@@ -27,6 +27,10 @@ export default function QuickWhatsAppUpload() {
     const [step, setStep] = useState(1);
     const [eventName, setEventName] = useState('');
     const [eventDate, setEventDate] = useState('');
+    const [venue, setVenue] = useState('');
+    const [locationUrl, setLocationUrl] = useState('');
+    const [groomName, setGroomName] = useState('');
+    const [brideName, setBrideName] = useState('');
     const [inputMethod, setInputMethod] = useState<'excel' | 'whatsapp' | null>(null);
     const [guestsData, setGuestsData] = useState<Guest[]>([]);
     const [cardImages, setCardImages] = useState<any[]>([]);
@@ -154,7 +158,11 @@ export default function QuickWhatsAppUpload() {
                 .insert([{
                     name: eventName,
                     date: eventDate,
-                    location: 'رفع سريع',
+                    location: venue || 'رفع سريع',
+                    venue: venue,
+                    location_maps_url: locationUrl,
+                    groom_name: groomName,
+                    bride_name: brideName,
                     description: `تم الرفع من ${inputMethod === 'whatsapp' ? 'قائمة WhatsApp' : 'Excel'}`
                 }])
                 .select()

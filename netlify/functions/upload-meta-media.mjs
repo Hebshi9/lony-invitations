@@ -1,5 +1,5 @@
 
-import { createClient } from '@supabase/supabase-api';
+import { createClient } from '@supabase/supabase-js';
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 export const handler = async (event) => {
@@ -16,17 +16,15 @@ export const handler = async (event) => {
 
     // 1. Fetch the image
     const imgRes = await fetch(imageUrl);
-    const blob = await imgRes.blob();
-    const formData = new URLSearchParams();
+    if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.statusText}`);
     
-    // Meta requires a form data upload for media
-    // However, Meta Cloud API for MEDIA upload is a bit different.
-    // It usually requires a POST to /phone-id/media with binary data.
+    const arrayBuffer = await imgRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
     
-    // For simplicity and high success, we'll use a multipart form data approach
     const { default: FormData } = await import('form-data');
     const form = new FormData();
-    form.append('file', blob.stream(), { filename: 'invite.jpg', contentType: blob.type });
+    form.append('file', buffer, { filename: 'invite.jpg', contentType });
     form.append('messaging_product', 'whatsapp');
 
     const metaRes = await fetch(`https://graph.facebook.com/v21.0/${META_PHONE_NUMBER_ID}/media`, {

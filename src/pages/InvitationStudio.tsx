@@ -9,6 +9,7 @@ import {
     Send
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { CONFIG } from '../lib/config';
 
 export default function InvitationStudio() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -208,10 +209,8 @@ export default function InvitationStudio() {
 
             if (cError) throw cError;
 
-            // 3. Trigger Backend
-            // Assuming the backend acts as a microservice on a different port or same domain/api
-            // Adjust URL based on where agent-dist is running (likely localhost:3001 or via proxy)
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            // 3. Trigger Backend using centralized config
+            const API_URL = CONFIG.API_URL;
             const response = await fetch(`${API_URL}/api/campaign/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

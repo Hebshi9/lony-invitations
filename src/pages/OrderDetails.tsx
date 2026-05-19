@@ -236,13 +236,13 @@ const OrderDetails: React.FC = () => {
     return (
         <div className="space-y-6" dir="rtl">
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <Button variant="ghost" onClick={() => navigate(-1)}>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <Button variant="ghost" onClick={() => navigate(-1)} className="p-2 sm:p-3">
                     <ArrowRight className="w-5 h-5" />
                 </Button>
                 <div>
-                    <h1 className="text-2xl font-bold text-lony-navy">تفاصيل الطلب #{order.id.slice(0, 8)}</h1>
-                    <p className="text-gray-500">{order.clients?.name} - {order.events?.name}</p>
+                    <h1 className="text-xl sm:text-2xl font-bold text-lony-navy">تفاصيل الطلب #{order.id.slice(0, 8)}</h1>
+                    <p className="text-sm text-gray-500">{order.clients?.name} - {order.events?.name}</p>
                 </div>
             </div>
 

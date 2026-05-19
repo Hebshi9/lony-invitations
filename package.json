@@ -18,6 +18,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:all": "npm run test && npm run test:e2e",
+    "qa:robot": "playwright test tests/e2e/lony_qa_robot.spec.js --headed",
+    "qa:master:pro": "playwright test tests/e2e/master_auditor_pro.spec.js --headed",
     "whatsapp:server": "node api/whatsapp-server.js",
     "whatsapp:evolution": "node api/whatsapp-server-simple.js",
     "whatsapp:green": "node api/green-api-server.js",

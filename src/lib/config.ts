@@ -1,49 +1,30 @@
 /**
- * Application Configuration
- * 
- * Central usage of Environment Variables to ensure
- * consistency across the application.
+ * Lony Core Configuration
+ * Central source of truth for API URLs and environment settings.
  */
 
-const getApiUrl = () => {
-    // 1. Fallback: Localhost or Primary VPS
-    const host = window.location.hostname;
+const isDev = import.meta.env.DEV;
+
+export const CONFIG = {
+    // API Endpoints
+    API_URL: (typeof window !== 'undefined' ? window.location.origin : 'https://lonyinvite.netlify.app'),
     
-    // If we are on localhost, use the proxy defined in vite.config.js
-    if (host === 'localhost' || host === '127.0.0.1') {
-        return `/api/remote-whatsapp`;
-    }
-
-    // Default to the proxy when deployed to bypass Mixed Content/CORS
-    return `/api/remote-whatsapp`;
-};
-
-const getPublicUrl = () => {
-    const host = window.location.hostname;
-    // Local development fallback
-    if (host === 'localhost' || host === '127.0.0.1') {
-        const port = window.location.port === '5173' ? '3001' : window.location.port;
-        return `http://${host}:${port}`;
-    }
-    
-    // Deployment fallback (use relative URL for proxying through Netlify)
-    return '';
-};
-
-export const config = {
-    supabase: {
-        url: import.meta.env.VITE_SUPABASE_URL,
-        anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+    // Meta Cloud API specific
+    META: {
+        VERSION: 'v18.0',
+        DEFAULT_LANGUAGE: 'ar'
     },
-    api: {
-        whatsapp: getApiUrl(),
-        sales: '/api/remote-sales',
-        public: getPublicUrl(),
+
+    // UI Constants
+    LUXURY_COLORS: {
+        NAVY: '#001F3F',
+        GOLD: '#D4AF37',
+        IVORY: '#FDFCF0'
     },
-    app: {
-        name: 'Lony Invitations',
-        version: '1.0.0',
-    }
+
+    // Feature Flags
+    ENABLE_AI_RSVP: true,
+    ENABLE_DEBT_PULSE: true // Ready for development
 };
 
-export default config;
+export default CONFIG;

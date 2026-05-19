@@ -5,8 +5,8 @@
 import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = 'https://gxunxhzjqclddoobxvpz.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzAzNDMsImV4cCI6MjA4MDEwNjM0M30.OoOj_c7cqbsO_lzFKSM6hhPAg2F_F5gpRwBgDh74TXg';
 
 class DatabaseService {
     constructor() {
@@ -88,6 +88,47 @@ class DatabaseService {
             rsvp_response: rsvpStatus,
             ai_confidence: confidence || 0
         });
+    }
+
+    async updateMessageDeliveryStatus(metaMessageId, status, errorData = null) {
+        console.log(`[DatabaseService] Updating status for ${metaMessageId} -> ${status}`);
+        
+        const updateObj = {
+            delivery_status: status,
+            updated_at: new Date().toISOString()
+        };
+
+        if (status === 'delivered') updateObj.delivered_at = new Date().toISOString();
+        if (status === 'read') updateObj.read_at = new Date().toISOString();
+        
+        if (errorData) {
+            updateObj.error_message = errorData.message || errorData.title || JSON.stringify(errorData);
+            updateObj.status = 'failed';
+        }
+
+        // 1. Update the message record
+        const { data: msg, error: msgErr } = await this.client
+            .from('whatsapp_messages')
+            .update(updateObj)
+            .eq('evolution_message_id', metaMessageId) 
+            .select('guest_id')
+            .maybeSingle();
+
+        if (msgErr) console.error('[DatabaseService] ❌ Status Update Error:', msgErr.message);
+
+        // 2. If failed, update the guest status too
+        if (status === 'failed' && msg?.guest_id) {
+            console.log(`[DatabaseService] 🚩 Marking guest ${msg.guest_id} as failed due to Meta rejection.`);
+            await this.client
+                .from('guests')
+                .update({ 
+                    status: 'failed', 
+                    updated_at: new Date().toISOString() 
+                })
+                .eq('id', msg.guest_id);
+        }
+
+        return { success: !msgErr };
     }
 }
 

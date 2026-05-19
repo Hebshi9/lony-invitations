@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import config from '../lib/config';
+import { CONFIG } from '../lib/config';
 import {
     Play, Send, CheckCircle, XCircle, Clock, Sparkles,
     Loader2, Phone, MessageSquare, Shield, Eye, Upload,
     Users, BarChart3, QrCode, Image as ImageIcon, Plus, Trash2, ArrowRight, RefreshCw
 } from 'lucide-react';
 
-const API_URL = config.api.whatsapp;
+const API_URL = CONFIG.API_URL;
 const LIVE_URL = 'https://lonyinvit.netlify.app';
 
 export default function DemoExperience() {

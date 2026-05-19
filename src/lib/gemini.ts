@@ -114,6 +114,38 @@ export const aiService = {
         }
     },
 
+    // 1c. Parse Guest List from Text (Pasted from WhatsApp)
+    async parseGuestText(text: string): Promise<any[]> {
+        try {
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const prompt = `
+                You are an expert data assistant. 
+                I have a guest list pasted from a chat or notes. 
+                Please extract the guest data into a structured JSON array.
+                
+                Rules:
+                1. Extract 'name', 'phone', 'email', 'table_no', 'companions_count'.
+                2. If 'companions_count' is not explicit, infer it from the name (e.g., "Sarah and 2 daughters" -> companions_count = 2).
+                3. If phone number is missing, leave it null.
+                4. Return ONLY the JSON array.
+                5. CLEANING RULES:
+                   - Name: Remove titles (Dr, Mr, Eng, الشيخ, الخ). Keep only the core name.
+                   - Phone: Normalize to E.164 (+966...). Handle 05xxxx as +9665xxxx.
+                
+                Text Content:
+                ${text.substring(0, 10000)}
+            `;
+
+            const result = await model.generateContent(prompt);
+            const textResponse = result.response.text();
+            const jsonStr = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+            return JSON.parse(jsonStr);
+        } catch (error) {
+            console.error('AI Text Parse Error:', error);
+            throw new Error('Failed to parse text list');
+        }
+    },
+
     // 2. Translate to Arabic
     async translateToArabic(text: string): Promise<string> {
         try {

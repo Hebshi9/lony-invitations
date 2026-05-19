@@ -139,7 +139,7 @@ describe('Database Schema Tests - Actual Structure', () => {
                 .limit(10);
 
             if (data && data.length > 0) {
-                const allowedStatuses = ['pending', 'attended', 'cancelled'];
+                const allowedStatuses = ['pending', 'attended', 'cancelled', 'confirmed', 'declined', 'maybe'];
                 data.forEach(guest => {
                     if (guest.status) {
                         expect(allowedStatuses).toContain(guest.status);

@@ -13,10 +13,25 @@
   --font-amiri: 'Amiri', serif;
 }
 
+html {
+  font-size: 12px; /* تصغير جذري للنظام ليكون فائق الرشاقة */
+}
+
 :root {
   font-family: 'Noto Kufi Arabic', sans-serif;
+  --sidebar-width: 240px; /* تقليل عرض القائمة الجانبية */
 }
 
 body {
   @apply bg-lony-sand text-lony-navy;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* تصغير المسافات العامة في الحاويات */
+.container {
+  max-width: 1400px !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
 }

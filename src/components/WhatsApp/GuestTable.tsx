@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-    CheckCircle, XCircle, Clock, Send, RefreshCcw, Edit2, Save, X
+    CheckCircle, XCircle, Clock, Send, RefreshCcw, Edit2, Save, X, Trash2, AlertTriangle
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -12,15 +12,32 @@ interface GuestTableProps {
     onEditPhone?: (guest: any, newPhone: string) => void;
     onShowLifecycle?: (guest: any) => void;
     onSendTest?: (guest: any) => void;
+    onDelete?: (guest: any) => void;
+    stuckTimeoutHours?: number; // Configurable timeout
 }
 
-const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus, onEditPhone, onShowLifecycle, onSendTest }) => {
+const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus, onEditPhone, onShowLifecycle, onSendTest, onDelete, stuckTimeoutHours = 3 }) => {
 
     const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null);
     const [editPhoneValue, setEditPhoneValue] = useState('');
 
     // Helper to get status icon and color from combined status
-    const getStatusInfo = (rawStatus: string, deliveryStatus?: string, errorMsg?: string, rsvpStatus?: string) => {
+    const getStatusInfo = (rawStatus: string, deliveryStatus?: string, errorMsg?: string, rsvpStatus?: string, messageDate?: string) => {
+        
+        // 🚨 INTITSAR GUARDRAIL: Detect "Stuck" messages (Sent but never Delivered)
+        const isStuck = deliveryStatus === 'sent' && messageDate && (
+            (new Date().getTime() - new Date(messageDate).getTime()) > (stuckTimeoutHours * 60 * 60 * 1000)
+        );
+
+        if (isStuck) {
+            return { 
+                icon: <div className="animate-pulse"><AlertTriangle className="w-4 h-4 text-amber-500" /></div>, 
+                color: 'text-amber-800', 
+                bg: 'bg-amber-50 border-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.2)]', 
+                label: 'عالقة ⚠️ (راجع الضيف)',
+                note: 'تم الإرسال من السيرفر ولكن لم يصل للهاتف بعد (احتمالية حالة إنتصار)'
+            };
+        }
         // IMPROVEMENT: If they responded (RSVP), they DEFINITELY read it.
         if (rsvpStatus && rsvpStatus !== 'none' && rsvpStatus !== 'pending') {
             return { 
@@ -38,11 +55,12 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
 
         // High priority: Failed
         if (rawStatus === 'failed' || deliveryStatus === 'failed') {
+            const isMetaBlock = errorMsg?.includes('131051') || errorMsg?.includes('سياسة الواتساب الدولية');
             return { 
                 icon: <XCircle className="w-4 h-4 text-rose-500" />, 
                 color: 'text-rose-700', 
                 bg: 'bg-rose-50 border-rose-100', 
-                label: 'فشل الإرسال',
+                label: isMetaBlock ? 'حجب ميتا الدعائي 🛡️' : 'فشل الإرسال',
                 note: errorMsg
             };
         }
@@ -74,6 +92,13 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                     bg: 'bg-emerald-50 border-emerald-100', 
                     label: 'وصلت (صحين) ✅' 
                 };
+            case 'bridging':
+                return { 
+                    icon: <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />, 
+                    color: 'text-blue-800', 
+                    bg: 'bg-blue-50 border-blue-200', 
+                    label: 'بانتظار الموافقة 🌉' 
+                };
             case 'sent': 
                 return { 
                     icon: <CheckCircle className="w-3.5 h-3.5 text-slate-300" />, 
@@ -85,7 +110,17 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                 return { icon: <Clock className="w-4 h-4 animate-pulse text-amber-500" />, color: 'text-amber-700', bg: 'bg-amber-50 border-amber-100', label: 'في الطابور' };
             case 'failed':
                 return { 
-                    icon: <XCircle className="w-4 h-4 text-rose-500" />, 
+                    icon: (
+                        <div className="group relative">
+                            <XCircle className="w-4 h-4 text-rose-500 cursor-help" />
+                            {errorMsg && (
+                                <div className="absolute bottom-full right-0 mb-2 invisible group-hover:visible z-50 w-48 p-2 bg-slate-800 text-white text-[10px] rounded-lg shadow-xl border border-slate-700 leading-relaxed text-right">
+                                    <div className="font-bold text-rose-300 mb-1 border-b border-white/10 pb-1">سبب الفشل:</div>
+                                    {errorMsg}
+                                </div>
+                            )}
+                        </div>
+                    ), 
                     color: 'text-rose-700', 
                     bg: 'bg-rose-50 border-rose-100', 
                     label: 'فشل الإرسال ❌',
@@ -93,7 +128,17 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                 };
         }
 
-        if (rawStatus === 'sent') return { icon: <CheckCircle className="w-3.5 h-3.5 text-slate-300" />, color: 'text-slate-500', bg: 'bg-slate-50 border-slate-100', label: 'جاري الإرسال.. 🚚' };
+        if (rawStatus === 'sent' && !deliveryStatus) {
+            return { 
+                icon: <CheckCircle className="w-3.5 h-3.5 text-slate-300" />, 
+                color: 'text-slate-500', 
+                bg: 'bg-slate-50 border-slate-100', 
+                label: 'تم الإرسال.. بانتظار تحديث الحالة',
+                note: 'تم إرسال الرسالة بنجاح وننتظر رد نظام الواتساب'
+            };
+        }
+
+        if (rawStatus === 'sent') return { icon: <CheckCircle className="w-3.5 h-3.5 text-slate-300" />, color: 'text-slate-500', bg: 'bg-slate-50 border-slate-100', label: 'تم الإرسال.. 🚚' };
         if (rawStatus === 'failed') return { icon: <XCircle className="w-4 h-4 text-rose-500" />, color: 'text-rose-700', bg: 'bg-rose-50 border-rose-100', label: 'فشل ❌', note: errorMsg };
         
         return { icon: <Clock className="w-4 h-4 text-slate-300" />, color: 'text-slate-400', bg: 'bg-slate-50 border-slate-100', label: 'بانتظار الإرسال' };
@@ -121,6 +166,7 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">حالة الإرسال</th>
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest text-center">كود الدخول 🎫</th>
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">الرد (RSVP)</th>
+                        <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">آخر نشاط</th>
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">تحكم</th>
                     </tr>
                 </thead>
@@ -143,8 +189,9 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                             const statusInfo = getStatusInfo(
                                 guest.status, 
                                 inviteMsg?.delivery_status, 
-                                inviteMsg?.error_message,
-                                guest.rsvp_status
+                                inviteMsg?.error_message || guest.custom_fields?.last_meta_error,
+                                guest.rsvp_status,
+                                inviteMsg?.created_at
                             );
                             const rsvpInfo = getRSVPInfo(guest.rsvp_status);
 
@@ -249,6 +296,16 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                                         </div>
                                     </td>
                                     <td className="p-4">
+                                        <div className="flex flex-col text-[9px] font-bold text-slate-400">
+                                            {inviteMsg?.updated_at ? (
+                                                <>
+                                                    <span>{new Date(inviteMsg.updated_at).toLocaleDateString('ar-SA')}</span>
+                                                    <span>{new Date(inviteMsg.updated_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                </>
+                                            ) : '--'}
+                                        </div>
+                                    </td>
+                                    <td className="p-4">
                                         <div className="flex items-center gap-2">
                                             {guest.status === 'failed' && (
                                                 <Button
@@ -279,6 +336,26 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                                                 >
                                                     🎯 تجربة
                                                 </Button>
+                                            )}
+                                            {onShowLifecycle && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => onShowLifecycle(guest)}
+                                                    className="bg-sky-50 border-sky-100 text-sky-600 hover:bg-sky-600 hover:text-white h-8 text-[10px] font-black px-3 rounded-xl transition-all flex items-center gap-1"
+                                                    title="معاينة ما يراه الضيف 👀"
+                                                >
+                                                    👀 معاينة
+                                                </Button>
+                                            )}
+                                            {onDelete && (
+                                                <button
+                                                    onClick={() => onDelete(guest)}
+                                                    className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                                                    title="حذف الضيف"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             )}
                                         </div>
                                     </td>

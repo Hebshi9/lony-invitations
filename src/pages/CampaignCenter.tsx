@@ -5,10 +5,10 @@ import {
     FileArchive, AlertTriangle, Check, X, ArrowLeft, Play
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import config from '../lib/config';
+import { CONFIG } from '../lib/config';
 import { Button } from '../components/ui/Button';
 
-const API_URL = config.api.whatsapp;
+const API_URL = CONFIG.API_URL;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Event { id: string; name: string; date: string; venue: string; }
@@ -306,13 +306,13 @@ export default function CampaignCenter() {
         <div className="min-h-screen bg-[#080810] text-white font-sans" dir="rtl">
             {/* Header */}
             <div className="border-b border-white/5 bg-[#0d0d1a]/80 backdrop-blur-xl sticky top-0 z-20">
-                <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div className="max-w-6xl mx-auto px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-xl font-black text-white tracking-tight">مركز الحملات</h1>
-                        <p className="text-xs text-gray-500 font-medium">إرسال الدعوات — تتبع الردود — توزيع الكروت</p>
+                        <p className="text-[10px] md:text-xs text-gray-500 font-medium">إرسال الدعوات — تتبع الردود — توزيع الكروت</p>
                     </div>
                     {selectedEvent && (
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
                             <button
                                 onClick={() => fetchGuests(selectedEvent.id)}
                                 className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"

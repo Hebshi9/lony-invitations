@@ -248,9 +248,9 @@ export const handler = async (event) => {
                     .limit(10);
                 
                 if (stashedGuests && stashedGuests.length > 0) {
-                    // Prioritize the one that has a card_image_url
-                    stashedGuest = stashedGuests.find(g => g.card_image_url) || stashedGuests[0];
-                    console.log(`[Bridge Smart Match] Picked ${stashedGuest.name} (Has Card: ${!!stashedGuest.card_image_url})`);
+                    // Use most recent stashed guest (already sorted by created_at DESC)
+                    stashedGuest = stashedGuests[0];
+                    console.log(`[Bridge Smart Match] Picked ${stashedGuest.name} (Most recent with pending data)`);
                 }
             }
 
@@ -396,25 +396,42 @@ async function handleRSVP(phone, status, contextId = null) {
     }
   }
 
-  // 2. PHASE 2: FALLBACK TO PHONE + EVENT MATCHING (If context missing or not found)
+  // 2. PHASE 2: FALLBACK — Match by LAST INVITATION MESSAGE sent to this phone
+  //    This is far more accurate than matching by guest creation date, because it
+  //    directly links to the actual message the user is responding to.
   if (!targetGuestId) {
-    console.log(`[Logic] Falling back to smart phone matching for suffix ${phoneSuffix}`);
-    // Match by phone suffix to handle 05, +966, etc.
-    // We fetch multiple records to find the BEST match (prioritizing the one with a personal card)
-    const { data: guestMatches } = await supabase
-      .from('guests')
-      .select('id, event_id, card_image_url, created_at')
+    console.log(`[Logic] Phase 2: Matching by last invitation message for suffix ${phoneSuffix}`);
+    
+    // Find the most recent invitation message sent to this phone number
+    const { data: lastInviteMsg } = await supabase
+      .from('whatsapp_messages')
+      .select('guest_id, event_id')
       .ilike('phone', `%${phoneSuffix}`)
+      .eq('message_phase', 'invitation')
       .order('created_at', { ascending: false })
-      .limit(10);
+      .limit(1)
+      .maybeSingle();
 
-    if (guestMatches && guestMatches.length > 0) {
-      // 🥇 Priority: Most RECENT guest record (already sorted by created_at DESC)
-      // This ensures the latest event invitation is matched, not an old one from another event
-      const bestMatch = guestMatches[0];
-      targetGuestId = bestMatch.id;
-      targetEventId = bestMatch.event_id;
-      console.log(`[Smart Match] Found Guest ID: ${targetGuestId} (Event: ${targetEventId}, Most Recent Record)`);
+    if (lastInviteMsg) {
+      targetGuestId = lastInviteMsg.guest_id;
+      targetEventId = lastInviteMsg.event_id;
+      console.log(`[Invite Match] SUCCESS! Matched via last invitation msg → Guest: ${targetGuestId}, Event: ${targetEventId}`);
+    } else {
+      // PHASE 3: Final fallback — use guest records sorted by creation date
+      console.log(`[Logic] Phase 3: No invitation msgs found. Falling back to guest records...`);
+      const { data: guestMatches } = await supabase
+        .from('guests')
+        .select('id, event_id, card_image_url, created_at')
+        .ilike('phone', `%${phoneSuffix}`)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (guestMatches && guestMatches.length > 0) {
+        const bestMatch = guestMatches[0];
+        targetGuestId = bestMatch.id;
+        targetEventId = bestMatch.event_id;
+        console.log(`[Fallback Match] Using most recent guest record → Guest: ${targetGuestId}, Event: ${targetEventId}`);
+      }
     }
   }
 

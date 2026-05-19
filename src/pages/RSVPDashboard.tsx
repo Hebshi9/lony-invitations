@@ -103,9 +103,9 @@ const RSVPDashboard: React.FC = () => {
 
     return (
         <div className="p-6 max-w-7xl mx-auto" dir="rtl">
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">📊 لوحة إدارة RSVP</h1>
-                <div className="flex items-center gap-3">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">📊 لوحة إدارة RSVP</h1>
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                     <select
                         className="border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500"
                         value={selectedEventId}

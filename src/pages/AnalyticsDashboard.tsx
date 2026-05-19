@@ -5,6 +5,7 @@ import { Users, Send, CheckCircle, Scan, RefreshCw, Download, MessageCircle, Loc
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import * as XLSX from 'xlsx';
 import { hasFeature, EventFeatures } from '../lib/features';
+import { CONFIG } from '../lib/config';
 
 const AnalyticsDashboard: React.FC = () => {
     const [stats, setStats] = useState({
@@ -164,9 +165,8 @@ const AnalyticsDashboard: React.FC = () => {
 
             // توليد التقرير
             const report = generateRSVPReport(guests, event);
-
-            // إرسال عبر WhatsApp API
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+            // إرسال عبر WhatsApp API باستخدام الإعدادات المركزية
+            const API_URL = CONFIG.API_URL;
             const response = await fetch(`${API_URL}/api/whatsapp/send`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -277,11 +277,11 @@ const AnalyticsDashboard: React.FC = () => {
 
     return (
         <div className="p-6 space-y-6 max-w-7xl mx-auto font-kufi" dir="rtl">
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-lony-navy font-amiri">لوحة الإحصائيات (Analytics)</h1>
-                <div className="flex gap-2">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <h1 className="text-2xl md:text-3xl font-bold text-lony-navy font-amiri">لوحة الإحصائيات (Analytics)</h1>
+                <div className="flex flex-wrap gap-2 w-full md:w-auto">
                     <select
-                        className="p-2 border rounded-lg"
+                        className="p-2 border rounded-lg flex-1 md:flex-none"
                         value={selectedEventId}
                         onChange={(e) => setSelectedEventId(e.target.value)}
                     >
@@ -292,19 +292,19 @@ const AnalyticsDashboard: React.FC = () => {
                     </button>
                     <button
                         onClick={handleExportExcel}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-sm font-bold"
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 text-xs md:text-sm font-bold flex-1 md:flex-none"
                         disabled={loading || !selectedEventId}
                     >
                         <Download className="w-4 h-4" />
-                        تصدير Excel
+                        Excel
                     </button>
                     <button
                         onClick={sendReportToClient}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm font-bold"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-xs md:text-sm font-bold flex-1 md:flex-none"
                         disabled={loading || !selectedEventId}
                     >
                         <MessageCircle className="w-4 h-4" />
-                        إرسال تقرير للعميل
+                        تقرير
                     </button>
                 </div>
             </div>

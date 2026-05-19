@@ -202,9 +202,9 @@ const UploadGuests: React.FC = () => {
         <div className="min-h-screen bg-gray-50 p-6" dir="rtl">
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-2">رفع قائمة الضيوف</h1>
-                    <p className="text-gray-600">رفع ملف Excel بذكاء اصطناعي لتحليل تلقائي</p>
+                <div className="mb-6 md:mb-8">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">رفع قائمة الضيوف</h1>
+                    <p className="text-sm md:text-base text-gray-600">رفع ملف Excel بذكاء اصطناعي لتحليل تلقائي</p>
                 </div>
 
                 {/* Step 1: Select Event */}
@@ -367,7 +367,7 @@ const UploadGuests: React.FC = () => {
                                         key={col.columnIndex}
                                         className="bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors"
                                     >
-                                        <div className="flex items-start justify-between gap-4">
+                                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                                             <div className="flex-1">
                                                 <div className="font-bold text-gray-800 mb-1">
                                                     {col.columnName}
@@ -377,7 +377,7 @@ const UploadGuests: React.FC = () => {
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-3 w-full sm:w-auto justify-between">
                                                 {/* Confidence Badge */}
                                                 {col.confidence > 0.7 && (
                                                     <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-bold whitespace-nowrap">

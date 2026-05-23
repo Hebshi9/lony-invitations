@@ -893,7 +893,7 @@ export default function WhatsAppSenderTest() {
                             eventId: selectedEventId,
                             guestIds: [guest.id],
                             campaignType,
-                            testPhone: isTestMode ? testPhone : null
+                            testPhone: null
                         })
                     });
 

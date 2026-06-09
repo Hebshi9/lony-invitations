@@ -419,7 +419,8 @@ async function processCampaign(eventId, guestIds, campaignType, testPhone) {
         const eventDate = event.date || 'قريباً';
         const eventLocation = event.location || event.location_name || 'الموقع';
         const headerImage = event.settings?.global_invite_image_url || 'https://gxunxhzjqclddoobxvpz.supabase.co/storage/v1/object/public/event-assets/demo_card.png';
-        const templateName = event.template_name || 'lony';
+        let templateName = event.template_name || 'lony';
+        if (templateName === 'lony') templateName = 'get_update';
 
         console.log(`📋 [Campaign] Event: "${event.name}" | ${groomName} & ${brideName}`);
         console.log(`📋 [Campaign] Template: ${templateName} | Image: ${headerImage}`);
@@ -584,18 +585,38 @@ async function processCampaign(eventId, guestIds, campaignType, testPhone) {
                     if (campaignType === 'reminder_rsvp') tplName = 'lony_reminder';
                     else if (campaignType === 'reminder_eve') tplName = 'lony_eve_reminder';
 
-                    payload = {
-                        templateName: tplName,
-                        languageCode: 'ar',
-                        imageUrl: headerImage,
-                        mediaId: null,
-                        variables: {
+                    let variables;
+                    if (tplName === 'lony_generic') {
+                        variables = {
+                            guest_name: guest.name || 'ضيفنا الكريم',
+                            event_name: event.name || 'المناسبة',
+                            event_date: eventDate,
+                            event_location: eventLocation,
+                            note: event.settings?.note || 'نتمنى حضوركم'
+                        };
+                    } else if (tplName === 'lony_reminder' || tplName === 'lony_eve_reminder') {
+                        variables = {
+                            guest_name: guest.name || 'ضيفنا الكريم',
+                            event_name: event.name || 'المناسبة',
+                            event_date: eventDate,
+                            event_location: eventLocation
+                        };
+                    } else {
+                        variables = {
                             guest_name: guest.name || 'ضيفنا الكريم',
                             groom_name: groomName,
                             bride_name: brideName,
                             event_date: eventDate,
                             event_location: eventLocation
-                        }
+                        };
+                    }
+
+                    payload = {
+                        templateName: tplName,
+                        languageCode: 'ar',
+                        imageUrl: headerImage,
+                        mediaId: null,
+                        variables
                     };
                 }
 
@@ -821,7 +842,8 @@ async function processCampaignV2(eventId, guestIds, campaignType, testPhone) {
         const eventDate = event.date || 'قريباً';
         const eventLocation = event.location || event.location_name || 'الموقع';
         const headerImage = event.settings?.global_invite_image_url || 'https://gxunxhzjqclddoobxvpz.supabase.co/storage/v1/object/public/event-assets/demo_card.png';
-        const templateName = event.template_name || 'lony';
+        let templateName = event.template_name || 'lony';
+        if (templateName === 'lony') templateName = 'get_update';
 
         activeJobs.set(eventId, { sent: 0, failed: 0, bridged: 0, skipped: 0 });
 
@@ -854,7 +876,34 @@ async function processCampaignV2(eventId, guestIds, campaignType, testPhone) {
                 } else {
                     let tplName = templateName;
                     if (campaignType === 'reminder_rsvp') tplName = 'lony_reminder';
-                    payload = { templateName: tplName, languageCode: 'ar', imageUrl: headerImage, variables: { guest_name: guest.name || 'ضيفنا الكريم', groom_name: groomName, bride_name: brideName, event_date: eventDate, event_location: eventLocation } };
+
+                    let variables;
+                    if (tplName === 'lony_generic') {
+                        variables = {
+                            guest_name: guest.name || 'ضيفنا الكريم',
+                            event_name: event.name || 'المناسبة',
+                            event_date: eventDate,
+                            event_location: eventLocation,
+                            note: event.settings?.note || 'نتمنى حضوركم'
+                        };
+                    } else if (tplName === 'lony_reminder' || tplName === 'lony_eve_reminder') {
+                        variables = {
+                            guest_name: guest.name || 'ضيفنا الكريم',
+                            event_name: event.name || 'المناسبة',
+                            event_date: eventDate,
+                            event_location: eventLocation
+                        };
+                    } else {
+                        variables = {
+                            guest_name: guest.name || 'ضيفنا الكريم',
+                            groom_name: groomName,
+                            bride_name: brideName,
+                            event_date: eventDate,
+                            event_location: eventLocation
+                        };
+                    }
+
+                    payload = { templateName: tplName, languageCode: 'ar', imageUrl: headerImage, variables };
                 }
 
                 const result = await MetaService.sendMessage(phone, payload);
@@ -892,7 +941,7 @@ async function processCampaignV2(eventId, guestIds, campaignType, testPhone) {
                         }[errorCode] || result.error || 'خطأ غير معروف';
                         
                         await db.from('guests').update({ status: 'failed' }).eq('id', guest.id);
-                        await db.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, status: 'failed', delivery_status: 'failed', error_message: arabicError, message_phase: 'invitation' });
+                        await db.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', delivery_status: 'failed', error_message: arabicError, message_phase: 'invitation' });
                     }
                 }
 

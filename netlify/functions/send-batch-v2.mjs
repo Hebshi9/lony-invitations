@@ -31,8 +31,29 @@ export const handler = async (eventReq, context) => {
             else if (phone.length === 10 && phone.startsWith('05')) phone = '966' + phone.substring(1);
 
             const eventLocation = event.location || event.location_name || 'الموقع';
-            const templateName = event.template_name || 'get_update';
+            let templateName = event.template_name || 'get_update';
+            if (templateName === 'lony') templateName = 'get_update';
             const headerImage = body.headerImage || event.settings?.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
+            const mapCoords = encodeURIComponent(event.location_maps_url || eventLocation || 'قاعة الاحتفالات');
+
+            let bodyParams = [];
+            if (templateName === 'lony_generic') {
+                bodyParams = [
+                    { type: 'text', parameter_name: 'guest_name', text: guest.name },
+                    { type: 'text', parameter_name: 'event_name', text: event.name || 'المناسبة' },
+                    { type: 'text', parameter_name: 'event_date', text: event.date || 'اليوم' },
+                    { type: 'text', parameter_name: 'event_location', text: eventLocation },
+                    { type: 'text', parameter_name: 'note', text: event.settings?.note || 'نتمنى حضوركم' }
+                ];
+            } else {
+                bodyParams = [
+                    { type: 'text', parameter_name: 'guest_name', text: guest.name }, 
+                    { type: 'text', parameter_name: 'groom_name', text: groomName }, 
+                    { type: 'text', parameter_name: 'bride_name', text: event.bride_name || 'العروس' }, 
+                    { type: 'text', parameter_name: 'event_date', text: event.date || 'اليوم' }, 
+                    { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                ];
+            }
 
             let payload;
             if (campaignType === 'manual_bridge') {
@@ -43,16 +64,10 @@ export const handler = async (eventReq, context) => {
                                 name: templateName, language: { code: 'ar' },
                                 components: [
                                     { type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] },
-                                    { type: 'body', parameters: [
-                                        { type: 'text', parameter_name: 'guest_name', text: guest.name }, 
-                                        { type: 'text', parameter_name: 'groom_name', text: groomName }, 
-                                        { type: 'text', parameter_name: 'bride_name', text: event.bride_name || 'العروس' }, 
-                                        { type: 'text', parameter_name: 'event_date', text: event.date || 'اليوم' }, 
-                                        { type: 'text', parameter_name: 'event_location', text: eventLocation }
-                                    ] },
+                                    { type: 'body', parameters: bodyParams },
                                     { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
                                     { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] },
-                                    { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(event.location_maps_url || eventLocation) }] }
+                                    { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: mapCoords }] }
                                 ]
                             }
                         };
@@ -78,20 +93,16 @@ export const handler = async (eventReq, context) => {
                         name: templateName, language: { code: 'ar' },
                         components: [
                             { type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] },
-                            { type: 'body', parameters: [
-                                { type: 'text', parameter_name: 'guest_name', text: guest.name }, 
-                                { type: 'text', parameter_name: 'groom_name', text: groomName }, 
-                                { type: 'text', parameter_name: 'bride_name', text: event.bride_name || 'العروس' }, 
-                                { type: 'text', parameter_name: 'event_date', text: event.date || 'اليوم' }, 
-                                { type: 'text', parameter_name: 'event_location', text: eventLocation }
-                            ] },
+                            { type: 'body', parameters: bodyParams },
                             { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
                             { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] },
-                            { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(event.location_maps_url || event.location || 'الموقع') }] }
+                            { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: mapCoords }] }
                         ]
                     }
                 };
             }
+
+            console.log(`[send-batch-v2] campaignType=${campaignType} | template=${payload?.template?.name} | to=${phone}`);
 
             const metaRes = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
                 method: 'POST',
@@ -115,7 +126,7 @@ export const handler = async (eventReq, context) => {
                 results.push({ guestId: guest.id, success: true });
             } else {
                 const errorMsg = metaData.error?.message || 'Meta Error';
-                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, status: 'failed', error_message: errorMsg });
+                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: errorMsg });
                 await supabase.from('guests').update({ status: 'failed' }).eq('id', guest.id);
                 results.push({ guestId: guest.id, success: false, error: errorMsg });
             }

@@ -49,7 +49,8 @@ export const handler = async (eventReq, context) => {
         const displayDate = eventTime ? `${eventDate} الساعة ${eventTime}` : eventDate;
         const eventLocation = event.location || event.location_name || 'الموقع';
         const headerImage = body.headerImage || event.settings?.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
-        const templateName = event.template_name || 'get_update';
+        let templateName = event.template_name || 'get_update';
+        if (templateName === 'lony') templateName = 'get_update';
 
         // 2. Fetch Targeted Guests
         const { data: guests } = await supabase.from('guests').select('*').in('id', guestIds);
@@ -127,54 +128,57 @@ export const handler = async (eventReq, context) => {
                             components: [{ type: 'body', parameters: [{ type: 'text', text: guest.name }, { type: 'text', text: `https://lonyinvite.netlify.app/check-in.html?id=${guest.id}` }] }]
                         }
                     };
-                } else if (templateName.trim() === 'get_update' || true) { // FORCE GET_UPDATE FOR DEBUG
-                    // DIRECT LINK PASS-THROUGH - URL-encode coordinates for Meta URL button
+                } else {
                     let mapCoords = encodeURIComponent(event.location_maps_url || eventLocation || 'قاعة الاحتفالات');
-                    const personalHeaderImage = headerImage;
+                    let bodyParams = [];
+                    let hasUrlButton = true;
+                    
+                    if (templateName === 'lony_generic') {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'event_name', text: event.name || 'المناسبة' },
+                            { type: 'text', parameter_name: 'event_date', text: displayDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation },
+                            { type: 'text', parameter_name: 'note', text: event.settings?.note || 'نتمنى حضوركم' }
+                        ];
+                    } else if (templateName === 'get_update') {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'groom_name', text: groomName },
+                            { type: 'text', parameter_name: 'bride_name', text: brideName },
+                            { type: 'text', parameter_name: 'event_date', text: displayDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                        ];
+                    } else {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'bride_name', text: brideName },
+                            { type: 'text', parameter_name: 'groom_name', text: groomName },
+                            { type: 'text', parameter_name: 'event_date', text: eventDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                        ];
+                        hasUrlButton = false;
+                    }
+
+                    const components = [
+                        { type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] },
+                        { type: 'body', parameters: bodyParams },
+                        { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
+                        { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] }
+                    ];
+
+                    if (hasUrlButton) {
+                        components.push({ type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: mapCoords }] });
+                    }
 
                     payload = {
                         messaging_product: 'whatsapp', to: phone, type: 'template',
                         template: {
-                            name: 'get_update', language: { code: 'ar' },
-                            components: [
-                                { type: 'header', parameters: [{ type: 'image', image: { link: personalHeaderImage } }] },
-                                {
-                                    type: 'body', parameters: [
-                                        { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
-                                        { type: 'text', parameter_name: 'groom_name', text: groomName },
-                                        { type: 'text', parameter_name: 'bride_name', text: brideName },
-                                        { type: 'text', parameter_name: 'event_date', text: displayDate },
-                                        { type: 'text', parameter_name: 'event_location', text: eventLocation }
-                                    ]
-                                },
-                                { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
-                                { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] },
-                                { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: mapCoords }] }
-                            ]
-                        }
-                    };
-                    console.log(`[Meta Debug] Sending get_update to ${phone}:`, JSON.stringify(payload, null, 2));
-                } else {
-                    payload = {
-                        messaging_product: 'whatsapp', to: phone, type: 'template',
-                        template: {
                             name: templateName, language: { code: 'ar' },
-                            components: [
-                                { type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] },
-                                {
-                                    type: 'body', parameters: [
-                                        { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
-                                        { type: 'text', parameter_name: 'bride_name', text: brideName },
-                                        { type: 'text', parameter_name: 'groom_name', text: groomName },
-                                        { type: 'text', parameter_name: 'event_date', text: eventDate },
-                                        { type: 'text', parameter_name: 'event_location', text: eventLocation }
-                                    ]
-                                },
-                                { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
-                                { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] }
-                            ]
+                            components
                         }
                     };
+                    console.log(`[Meta Debug] Sending template ${templateName} to ${phone}:`, JSON.stringify(payload, null, 2));
                 }
 
                 // --- EXECUTE ---
@@ -196,7 +200,8 @@ export const handler = async (eventReq, context) => {
                         status: 'sent',
                         delivery_status: 'sent',
                         evolution_message_id: metaData.messages?.[0]?.id,
-                        message_phase: isReminder ? 'reminder' : (isQR ? 'qr_code' : 'invitation')
+                        message_phase: isReminder ? 'reminder' : (isQR ? 'qr_code' : 'invitation'),
+                        message_text: isReminder ? 'تذكير' : (isQR ? 'بطاقة دخول' : 'دعوة رسمية')
                     }]);
 
                     if (insertError) {
@@ -248,26 +253,26 @@ export const handler = async (eventReq, context) => {
 
                         if (bRes.ok) {
                             await supabase.from('whatsapp_messages').insert({
-                                guest_id: guest.id, event_id: eventId, status: 'sent', delivery_status: 'bridging',
+                                guest_id: guest.id, event_id: eventId, phone: phone, status: 'sent', delivery_status: 'bridging',
                                 wa_id: bData.messages?.[0]?.id, message_phase: 'bridge', category: 'utility'
                             });
                             results.push({ guestId: guest.id, success: true, bridged: true });
                         } else {
                             activeStats.failed++;
-                            await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, status: 'failed', error_message: bData.error?.message });
+                            await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: bData.error?.message });
                             results.push({ guestId: guest.id, success: false, error: bData.error?.message, bridged: false });
                         }
 
                     } else {
                         activeStats.failed++;
                         const errorMsg = metaData.error?.message || 'Unknown Meta Error';
-                        await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, status: 'failed', error_message: errorMsg });
+                        await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: errorMsg });
                         results.push({ guestId: guest.id, success: false, error: errorMsg });
                     }
                 }
             } catch (e) {
                 console.error(`❌ Error for ${guest.name}:`, e.message);
-                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, status: 'failed', error_message: e.message });
+                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: e.message });
                 results.push({ guestId: guest.id, success: false, error: e.message });
             }
         }

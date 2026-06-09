@@ -196,10 +196,9 @@ class MetaService {
                 raw: statusObj
             };
         }
-
         return null;
     }
-}
+
     /**
      * Clean and format phone number for Meta
      */

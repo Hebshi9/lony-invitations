@@ -248,55 +248,84 @@ export const handler = async (event) => {
                     .limit(10);
                 
                 if (stashedGuests && stashedGuests.length > 0) {
-                    // Use most recent stashed guest (already sorted by created_at DESC)
                     stashedGuest = stashedGuests[0];
                     console.log(`[Bridge Smart Match] Picked ${stashedGuest.name} (Most recent with pending data)`);
                 }
             }
 
             if (stashedGuest?.pending_marketing_data) {
-                console.log(`[Bridge Webhook] 🚀 Re-triggering invitation for ${stashedGuest.name}`);
+                console.log(`[Bridge Webhook] 🚀 Re-triggering stashed marketing payload for ${stashedGuest.name}`);
                 
                 const metaUrl = `https://graph.facebook.com/v21.0/1031606736708015/messages`;
                 const metaToken = 'EAAV4hiaLibsBRIZBfcKbHswSgZAZA8yxn9wcjAn3fZBO3FsPIEkqY4O1IHkiGcKMAWFTZAm4M0CsfaCGX8fUyCbGSdVbYq6gW0a5VGgRdAsRZA0yTB2ZCc6cFQ796eKOVe6DmU34UW25jBYMnGFm91fSGIMO6bXWZC3SkSKswH0YZBK0tgfN2Er2z7iAvAK75ZAdUtAukesvmyOb9Rrbb1pQiRDpQITe1zBTkjuWRG';
 
-                // 🏗️ RECONSTRUCT PAYLOAD FOR MAXIMUM STABILITY
-                // We use the GENERAL image for Step 2 as requested by the user
-                const eventSettings = stashedGuest.events?.settings || {};
-                const imageUrl = eventSettings.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
-                const groomName = stashedGuest.events?.groom_name || eventSettings.groom_name || 'العريس';
-                const brideName = stashedGuest.events?.bride_name || eventSettings.bride_name || 'العروس';
-                const eventDate = stashedGuest.events?.date || 'قريباً';
-                const eventLocation = stashedGuest.events?.location || 'الموقع';
+                let finalPayload;
+                if (typeof stashedGuest.pending_marketing_data === 'object' && stashedGuest.pending_marketing_data.template) {
+                    finalPayload = {
+                        ...stashedGuest.pending_marketing_data,
+                        to: from
+                    };
+                } else {
+                    const eventSettings = stashedGuest.events?.settings || {};
+                    const imageUrl = eventSettings.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
+                    const groomName = stashedGuest.events?.groom_name || eventSettings.groom_name || 'العريس';
+                    const brideName = stashedGuest.events?.bride_name || eventSettings.bride_name || 'العروس';
+                    const eventDate = stashedGuest.events?.date || 'قريباً';
+                    const eventLocation = stashedGuest.events?.location || 'الموقع';
+                    const templateName = stashedGuest.events?.template_name || 'get_update';
 
-                const finalPayload = {
-                    messaging_product: 'whatsapp',
-                    to: from,
-                    type: 'template',
-                    template: {
-                        name: 'get_update',
-                        language: { code: 'ar' },
-                        components: [
-                            { 
-                                type: 'header', 
-                                parameters: [{ type: 'image', image: { link: imageUrl } }] 
-                            },
-                            {
-                                type: 'body',
-                                parameters: [
-                                    { type: 'text', parameter_name: 'guest_name', text: String(stashedGuest.name || 'ضيفنا').trim() },
-                                    { type: 'text', parameter_name: 'groom_name', text: groomName },
-                                    { type: 'text', parameter_name: 'bride_name', text: brideName },
-                                    { type: 'text', parameter_name: 'event_date', text: eventDate },
-                                    { type: 'text', parameter_name: 'event_location', text: eventLocation }
-                                ]
-                            },
-                            { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
-                            { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] },
-                            { type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(stashedGuest.events?.location_maps_url || eventLocation || 'قاعة الاحتفالات') }] }
-                        ]
+                    let bodyParams = [];
+                    let hasUrlButton = true;
+                    
+                    if (templateName === 'lony_generic') {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(stashedGuest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'event_name', text: stashedGuest.events?.name || 'المناسبة' },
+                            { type: 'text', parameter_name: 'event_date', text: eventDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation },
+                            { type: 'text', parameter_name: 'note', text: eventSettings.note || 'نتمنى حضوركم' }
+                        ];
+                    } else if (templateName === 'get_update') {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(stashedGuest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'groom_name', text: groomName },
+                            { type: 'text', parameter_name: 'bride_name', text: brideName },
+                            { type: 'text', parameter_name: 'event_date', text: eventDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                        ];
+                    } else {
+                        bodyParams = [
+                            { type: 'text', parameter_name: 'guest_name', text: String(stashedGuest.name || 'ضيفنا').trim() },
+                            { type: 'text', parameter_name: 'bride_name', text: brideName },
+                            { type: 'text', parameter_name: 'groom_name', text: groomName },
+                            { type: 'text', parameter_name: 'event_date', text: eventDate },
+                            { type: 'text', parameter_name: 'event_location', text: eventLocation }
+                        ];
+                        hasUrlButton = false;
                     }
-                };
+
+                    const components = [
+                        { type: 'header', parameters: [{ type: 'image', image: { link: imageUrl } }] },
+                        { type: 'body', parameters: bodyParams },
+                        { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'CONFIRM' }] },
+                        { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: 'DECLINE' }] }
+                    ];
+
+                    if (hasUrlButton) {
+                        components.push({ type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(stashedGuest.events?.location_maps_url || eventLocation || 'قاعة الاحتفالات') }] });
+                    }
+
+                    finalPayload = {
+                        messaging_product: 'whatsapp',
+                        to: from,
+                        type: 'template',
+                        template: {
+                            name: templateName,
+                            language: { code: 'ar' },
+                            components
+                        }
+                    };
+                }
 
                 const bRes = await fetch(metaUrl, {
                     method: 'POST',

@@ -14,9 +14,17 @@ interface GuestTableProps {
     onSendTest?: (guest: any) => void;
     onDelete?: (guest: any) => void;
     stuckTimeoutHours?: number; // Configurable timeout
+    selectedGuestIds?: string[];
+    onToggleSelect?: (guestId: string) => void;
+    onToggleSelectAll?: () => void;
+    isAllSelected?: boolean;
 }
 
-const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, onOverrideStatus, onEditPhone, onShowLifecycle, onSendTest, onDelete, stuckTimeoutHours = 3 }) => {
+const GuestTable: React.FC<GuestTableProps> = ({ 
+    guests, onRetry, onDirectSend, onOverrideStatus, onEditPhone, 
+    onShowLifecycle, onSendTest, onDelete, stuckTimeoutHours = 3,
+    selectedGuestIds, onToggleSelect, onToggleSelectAll, isAllSelected
+}) => {
 
     const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null);
     const [editPhoneValue, setEditPhoneValue] = useState('');
@@ -159,6 +167,16 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
             <table className="w-full text-right">
                 <thead className="bg-slate-50/80 border-b border-slate-100">
                     <tr>
+                        {selectedGuestIds && onToggleSelectAll && (
+                            <th className="p-4 text-center w-12">
+                                <input
+                                    type="checkbox"
+                                    checked={isAllSelected}
+                                    onChange={onToggleSelectAll}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                />
+                            </th>
+                        )}
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest text-center">التسلسل</th>
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">اسم الضيف</th>
                         <th className="p-4 font-black text-slate-400 uppercase text-[10px] tracking-widest">رقم الجوال</th>
@@ -173,7 +191,7 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                 <tbody className="divide-y divide-slate-50">
                     {guests.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-20 text-center">
+                            <td colSpan={selectedGuestIds ? 10 : 9} className="p-20 text-center">
                                 <div className="flex flex-col items-center gap-2 opacity-30">
                                     <Send className="w-12 h-12 text-slate-300" />
                                     <span className="text-sm font-bold text-slate-500">لا يوجد ضيوف في هذه القائمة لبدء التتبع</span>
@@ -182,7 +200,6 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
                         </tr>
                     ) : (
                         guests.map((guest, index) => {
-                            // Find the most recent message specifically for the 'invitation' phase to show the journey clearly
                             const msgs = guest.whatsapp_messages || [];
                             const inviteMsg = msgs.findLast((m: any) => m.message_phase === 'invitation') || (msgs.length > 0 ? msgs[msgs.length - 1] : null);
                             
@@ -197,6 +214,16 @@ const GuestTable: React.FC<GuestTableProps> = ({ guests, onRetry, onDirectSend, 
 
                             return (
                                 <tr key={guest.id} className="hover:bg-slate-50/50 transition-all group">
+                                    {selectedGuestIds && onToggleSelect && (
+                                        <td className="p-4 text-center w-12">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedGuestIds.includes(guest.id)}
+                                                onChange={() => onToggleSelect(guest.id)}
+                                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                                            />
+                                        </td>
+                                    )}
                                     <td className="p-4 text-center text-[10px] font-black text-slate-300">{index + 1}</td>
                                     <td className="p-4 font-bold text-slate-700 min-w-[140px]">
                                         <div className="flex items-center gap-2 group/name">

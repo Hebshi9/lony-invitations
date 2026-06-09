@@ -141,10 +141,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             {/* Main Content */}
             <main className={cn(
                 "flex-1 overflow-y-auto bg-lony-sand h-[calc(100vh-64px)] md:h-screen transition-all duration-300",
-                (location.pathname === '/whatsapp-sender' || location.pathname === '/sender-test') ? "p-0" : "p-2 md:p-4"
+                (location.pathname === '/whatsapp-sender' || location.pathname === '/sender-test' || location.pathname === '/sender-custom') ? "p-0" : "p-2 md:p-4"
             )}>
                 <div className={cn(
-                    (location.pathname === '/whatsapp-sender' || location.pathname === '/sender-test') ? "w-full" : "max-w-7xl mx-auto"
+                    (location.pathname === '/whatsapp-sender' || location.pathname === '/sender-test' || location.pathname === '/sender-custom') ? "w-full" : "max-w-7xl mx-auto"
                 )}>
                     {children}
                 </div>

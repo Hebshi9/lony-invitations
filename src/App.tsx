@@ -23,6 +23,7 @@ import { XCircle } from 'lucide-react';
 
 import WhatsAppSender from './pages/WhatsAppSender';
 import WhatsAppSenderTest from './pages/WhatsAppSenderTest';
+import WhatsAppSenderCustom from './pages/WhatsAppSenderCustom';
 import SalesAI from './pages/SalesAI';
 import ExternalCardsUpload from './pages/ExternalCardsUpload';
 import QuickWhatsAppUpload from './pages/QuickWhatsAppUpload';
@@ -124,6 +125,7 @@ const AppContent: React.FC = () => {
 
                 <Route path="/whatsapp-sender" element={<WhatsAppSender />} />
                 <Route path="/sender-test" element={<WhatsAppSenderTest />} />
+                <Route path="/sender-custom" element={<WhatsAppSenderCustom />} />
                 <Route path="/sales-ai" element={<SalesAI />} />
                 <Route path="/quick-upload" element={<QuickWhatsAppUpload />} />
                 <Route path="/external-upload" element={<ExternalCardsUpload />} />

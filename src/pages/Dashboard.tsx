@@ -1,11 +1,9 @@
-// Build fix: 2026-06-09 22:59
 import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { supabase } from '../lib/supabaseClient';
 import IntakeRequestList from '../components/IntakeRequestList';
 import OrderList from '../components/OrderList';
-// import CardTemplateEditor from '../components/CardTemplateEditor';
 import { LayoutDashboard, FileInput, ShoppingBag, Palette } from 'lucide-react';
 
 interface Event {
@@ -41,7 +39,6 @@ const Dashboard: React.FC = () => {
         try {
             setLoading(true);
 
-            // Fetch stats
             const { count: eventsCount } = await supabase
                 .from('events')
                 .select('*', { count: 'exact', head: true });
@@ -50,7 +47,6 @@ const Dashboard: React.FC = () => {
                 .from('guests')
                 .select('*', { count: 'exact', head: true });
 
-            // Assuming 'sent' status or just total guests for now if status isn't fully utilized
             const { count: sentCount } = await supabase
                 .from('guests')
                 .select('*', { count: 'exact', head: true })
@@ -62,7 +58,6 @@ const Dashboard: React.FC = () => {
                 sentInvitations: sentCount || 0,
             });
 
-            // Fetch recent events
             const { data: events } = await supabase
                 .from('events')
                 .select('*')
@@ -87,32 +82,28 @@ const Dashboard: React.FC = () => {
                 <div className="flex gap-2 bg-white p-1 rounded-lg border shadow-sm overflow-x-auto w-full md:w-auto">
                     <button
                         onClick={() => setActiveTab('overview')}
-                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'overview' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
-                            }`}
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'overview' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <LayoutDashboard className="w-4 h-4" />
                         نظرة عامة
                     </button>
                     <button
                         onClick={() => setActiveTab('intake')}
-                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'intake' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
-                            }`}
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'intake' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <FileInput className="w-4 h-4" />
                         طلبات العملاء
                     </button>
                     <button
                         onClick={() => setActiveTab('orders')}
-                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'orders' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
-                            }`}
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'orders' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <ShoppingBag className="w-4 h-4" />
                         الطلبات
                     </button>
                     <button
                         onClick={() => setActiveTab('templates')}
-                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'templates' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'
-                            }`}
+                        className={`px-3 md:px-4 py-2 rounded-md text-xs md:text-sm font-bold flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'templates' ? 'bg-lony-navy text-white' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <Palette className="w-4 h-4" />
                         القوالب
@@ -120,7 +111,6 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* Production Toolbar */}
             <div className="flex flex-wrap gap-2 border-b pb-4">
                 <Button onClick={() => window.location.href = '/upload-guests'} className="bg-blue-600 hover:bg-blue-700 h-9 px-4 text-xs">
                     <FileInput className="w-3 h-3 ml-1.5" />
@@ -221,7 +211,6 @@ const Dashboard: React.FC = () => {
 
             {activeTab === 'intake' && <IntakeRequestList />}
             {activeTab === 'orders' && <OrderList />}
-            {/* {activeTab === 'templates' && <CardTemplateEditor />} */}
         </div>
     );
 };

@@ -8,7 +8,7 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SU
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAV4hiaLibsBRIZBfcKbHswSgZAZA8yxn9wcjAn3fZBO3FsPIEkqY4O1IHkiGcKMAWFTZAm4M0CsfaCGX8fUyCbGSdVbYq6gW0a5VGgRdAsRZA0yTB2ZCc6cFQ796eKOVe6DmU34UW25jBYMnGFm91fSGIMO6bXWZC3SkSKswH0YZBK0tgfN2Er2z7iAvAK75ZAdUtAukesvmyOb9Rrbb1pQiRDpQITe1zBTkjuWRG';
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAV4hiaLibsBRn4mCPQ8sxJEyY5rXUaQ8xJhDuyBxVwkTnEx1ZArMK2YTZBuNROKsy0NBNUUUZBX77WrZAFfYMdMItbY7y5ESIwtS8KVwkpuhIq727wfmhC5biAWVuh6tbDkZAbNhFAc0yq0jZCCNebdZACCkZCOC76BzJZCa4Dwr4F7e0hIHZAI9rjdcPpVGJZAZBFEYrUPAYM2y5wDAk2REfWOgeEKrH6KvBQmufpbE6D36MOlFDG1TH3ZBWGB0PxyoCPuBr7ijZBuvFMOEiGOhEUsJaYITD';
 const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID || '1031606736708015';
 const META_VERSION = 'v21.0';
 const VERIFY_TOKEN = 'lony_invite_v1_secure';
@@ -257,7 +257,7 @@ export const handler = async (event) => {
                 console.log(`[Bridge Webhook] 🚀 Re-triggering stashed marketing payload for ${stashedGuest.name}`);
                 
                 const metaUrl = `https://graph.facebook.com/v21.0/1031606736708015/messages`;
-                const metaToken = 'EAAV4hiaLibsBRIZBfcKbHswSgZAZA8yxn9wcjAn3fZBO3FsPIEkqY4O1IHkiGcKMAWFTZAm4M0CsfaCGX8fUyCbGSdVbYq6gW0a5VGgRdAsRZA0yTB2ZCc6cFQ796eKOVe6DmU34UW25jBYMnGFm91fSGIMO6bXWZC3SkSKswH0YZBK0tgfN2Er2z7iAvAK75ZAdUtAukesvmyOb9Rrbb1pQiRDpQITe1zBTkjuWRG';
+                const metaToken = META_ACCESS_TOKEN;
 
                 let finalPayload;
                 if (typeof stashedGuest.pending_marketing_data === 'object' && stashedGuest.pending_marketing_data.template) {

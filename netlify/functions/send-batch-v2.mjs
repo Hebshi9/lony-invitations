@@ -127,7 +127,15 @@ export const handler = async (eventReq, context) => {
                 results.push({ guestId: guest.id, success: true });
             } else {
                 const errorMsg = metaData.error?.message || 'Meta Error';
-                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: errorMsg });
+                await supabase.from('whatsapp_messages').insert({ 
+                    guest_id: guest.id, 
+                    event_id: eventId, 
+                    phone: phone, 
+                    status: 'failed', 
+                    error_message: errorMsg,
+                    message_text: 'فشل إرسال الدعوة',
+                    message_phase: campaignType === 'manual_bridge' ? 'bridge' : 'invitation'
+                });
                 await supabase.from('guests').update({ status: 'failed' }).eq('id', guest.id);
                 results.push({ guestId: guest.id, success: false, error: errorMsg });
             }

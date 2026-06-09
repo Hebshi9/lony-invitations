@@ -22,14 +22,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Get initial session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
-            setUser(session?.user ?? null);
+            if (session?.user) {
+                setUser(session.user);
+            } else if (!import.meta.env.PROD) {
+                setUser({
+                    id: 'mock-dev-id',
+                    email: 'projectju18@gmail.com',
+                    app_metadata: {},
+                    user_metadata: {},
+                    aud: 'authenticated',
+                    created_at: new Date().toISOString()
+                } as User);
+            } else {
+                setUser(null);
+            }
             setLoading(false);
         });
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session);
-            setUser(session?.user ?? null);
+            if (session?.user) {
+                setUser(session.user);
+            } else if (!import.meta.env.PROD) {
+                setUser({
+                    id: 'mock-dev-id',
+                    email: 'projectju18@gmail.com',
+                    app_metadata: {},
+                    user_metadata: {},
+                    aud: 'authenticated',
+                    created_at: new Date().toISOString()
+                } as User);
+            } else {
+                setUser(null);
+            }
         });
 
         return () => subscription.unsubscribe();

@@ -1,3 +1,4 @@
+// Trigger build with new environment variables - 2026-06-09
 import { createClient } from '@supabase/supabase-js';
 import fetch from 'node-fetch';
 

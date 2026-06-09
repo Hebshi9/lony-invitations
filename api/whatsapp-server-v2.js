@@ -941,7 +941,16 @@ async function processCampaignV2(eventId, guestIds, campaignType, testPhone) {
                         }[errorCode] || result.error || 'خطأ غير معروف';
                         
                         await db.from('guests').update({ status: 'failed' }).eq('id', guest.id);
-                        await db.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', delivery_status: 'failed', error_message: arabicError, message_phase: 'invitation' });
+                        await db.from('whatsapp_messages').insert({ 
+                            guest_id: guest.id, 
+                            event_id: eventId, 
+                            phone: phone, 
+                            status: 'failed', 
+                            delivery_status: 'failed', 
+                            error_message: arabicError, 
+                            message_phase: 'invitation',
+                            message_text: 'فشل إرسال الدعوة'
+                        });
                     }
                 }
 

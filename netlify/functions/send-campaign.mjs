@@ -253,26 +253,57 @@ export const handler = async (eventReq, context) => {
 
                         if (bRes.ok) {
                             await supabase.from('whatsapp_messages').insert({
-                                guest_id: guest.id, event_id: eventId, phone: phone, status: 'sent', delivery_status: 'bridging',
-                                wa_id: bData.messages?.[0]?.id, message_phase: 'bridge', category: 'utility'
+                                guest_id: guest.id, 
+                                event_id: eventId, 
+                                phone: phone, 
+                                status: 'sent', 
+                                delivery_status: 'bridging',
+                                wa_id: bData.messages?.[0]?.id, 
+                                message_phase: 'bridge', 
+                                category: 'utility',
+                                message_text: 'رسالة تمهيدية (جسر العبور)'
                             });
                             results.push({ guestId: guest.id, success: true, bridged: true });
                         } else {
                             activeStats.failed++;
-                            await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: bData.error?.message });
+                            await supabase.from('whatsapp_messages').insert({ 
+                                guest_id: guest.id, 
+                                event_id: eventId, 
+                                phone: phone, 
+                                status: 'failed', 
+                                error_message: bData.error?.message,
+                                message_text: 'فشل إرسال جسر العبور',
+                                message_phase: 'bridge'
+                            });
                             results.push({ guestId: guest.id, success: false, error: bData.error?.message, bridged: false });
                         }
 
                     } else {
                         activeStats.failed++;
                         const errorMsg = metaData.error?.message || 'Unknown Meta Error';
-                        await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: errorMsg });
+                        await supabase.from('whatsapp_messages').insert({ 
+                            guest_id: guest.id, 
+                            event_id: eventId, 
+                            phone: phone, 
+                            status: 'failed', 
+                            error_message: errorMsg,
+                            message_text: 'فشل إرسال الدعوة',
+                            message_phase: 'invitation'
+                        });
                         results.push({ guestId: guest.id, success: false, error: errorMsg });
                     }
                 }
             } catch (e) {
                 console.error(`❌ Error for ${guest.name}:`, e.message);
-                await supabase.from('whatsapp_messages').insert({ guest_id: guest.id, event_id: eventId, phone: phone, status: 'failed', error_message: e.message });
+                await supabase.from('whatsapp_messages').insert({ 
+                    guest_id: guest.id, 
+                    event_id: eventId, 
+                    phone: phone, 
+                    status: 'failed', 
+                    error_message: e.message,
+                    message_text: 'فشل النظام العام',
+                    message_phase: 'invitation'
+                });
                 results.push({ guestId: guest.id, success: false, error: e.message });
             }
         }

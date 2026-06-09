@@ -1,5 +1,5 @@
 
-const API_KEY = 'AIzaSyDLu7YZVb-F4kjjhKzIJ7L7u92aiYKZ7Ho';
+const API_KEY = 'AIzaSy-REMOVED_FOR_SECURITY';
 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
 
 async function test() {

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "rm -rf node_modules/.vite && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "db:setup": "node scripts/setup-db.js",

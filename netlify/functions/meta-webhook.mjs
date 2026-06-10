@@ -8,7 +8,7 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SU
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAV4hiaLibsBRn4mCPQ8sxJEyY5rXUaQ8xJhDuyBxVwkTnEx1ZArMK2YTZBuNROKsy0NBNUUUZBX77WrZAFfYMdMItbY7y5ESIwtS8KVwkpuhIq727wfmhC5biAWVuh6tbDkZAbNhFAc0yq0jZCCNebdZACCkZCOC76BzJZCa4Dwr4F7e0hIHZAI9rjdcPpVGJZAZBFEYrUPAYM2y5wDAk2REfWOgeEKrH6KvBQmufpbE6D36MOlFDG1TH3ZBWGB0PxyoCPuBr7ijZBuvFMOEiGOhEUsJaYITD';
+const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAV4hiaLibsBRrouDUKEcJYy8xhOLxI5YZA8WaQHZBHYFOZAJuuowyhWJm4mzRFPFR1F4byHCVC2pRXMdOj4ANNIY5NXwAiNHkAhpVDtUhTZCbU1JAwkwOEbMNb9xjWroKeKnT55coZCAhyGc6uvt2VzP0wYKGbMy5wxz1cXxzvoDzPZBAsbVlsoc9RAQaJnnxXwZDZD';
 const META_PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID || '1031606736708015';
 const META_VERSION = 'v21.0';
 const VERIFY_TOKEN = 'lony_invite_v1_secure';
@@ -256,6 +256,21 @@ export const handler = async (event) => {
             if (stashedGuest?.pending_marketing_data) {
                 console.log(`[Bridge Webhook] 🚀 Re-triggering stashed marketing payload for ${stashedGuest.name}`);
                 
+                // --- ATOMIC DEDUPLICATION GUARD ---
+                // Only the FIRST concurrent webhook will succeed in updating and returning data
+                const { data: lockCheck, error: lockError } = await supabase
+                    .from('guests')
+                    .update({ pending_marketing_data: null })
+                    .eq('id', stashedGuest.id)
+                    .not('pending_marketing_data', 'is', null)
+                    .select('id')
+                    .single();
+
+                if (lockError || !lockCheck) {
+                    console.log(`[Bridge Webhook] 🛑 Race condition caught! Payload already consumed by parallel webhook for ${stashedGuest.name}.`);
+                    return { statusCode: 200, body: 'OK' }; // Stop execution for duplicates
+                }
+
                 const metaUrl = `https://graph.facebook.com/v21.0/1031606736708015/messages`;
                 const metaToken = META_ACCESS_TOKEN;
 
@@ -312,7 +327,9 @@ export const handler = async (event) => {
                     ];
 
                     if (hasUrlButton) {
-                        components.push({ type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: encodeURIComponent(stashedGuest.events?.location_maps_url || eventLocation || 'قاعة الاحتفالات') }] });
+                        let locStr = stashedGuest.events?.location_maps_url || eventLocation || 'قاعة الاحتفالات';
+                        locStr = locStr.trim();
+                        components.push({ type: 'button', sub_type: 'url', index: 2, parameters: [{ type: 'text', text: locStr }] });
                     }
 
                     finalPayload = {
@@ -338,7 +355,7 @@ export const handler = async (event) => {
                 // 📝 LOG THE RESULT TO DB FOR FORENSICS
                 await supabase.from('webhook_debug_logs').insert([{
                     payload: {
-                        bridge_action: 're_send_attempt_v2',
+                        bridge_action: 're_send_attempt_v3',
                         guest_name: stashedGuest.name,
                         phone: from,
                         status: bRes.status,
@@ -348,7 +365,7 @@ export const handler = async (event) => {
                 }]);
 
                 if (bRes.ok) {
-                    await supabase.from('guests').update({ status: 'sent', pending_marketing_data: null }).eq('id', stashedGuest.id);
+                    await supabase.from('guests').update({ status: 'sent' }).eq('id', stashedGuest.id);
                     
                     // LOG the actual invitation
                     await supabase.from('whatsapp_messages').insert([{
@@ -365,7 +382,8 @@ export const handler = async (event) => {
                     console.log(`[Bridge Webhook] ✅ Marketing sent and logged for ${stashedGuest.name}`);
                 } else {
                     console.error(`[Bridge Webhook] ❌ Re-send failed for ${stashedGuest.name}:`, JSON.stringify(bData));
-                    await supabase.from('guests').update({ status: 'bridge_failed' }).eq('id', stashedGuest.id);
+                    // Restore it so it can be retried if needed, but mark as failed
+                    await supabase.from('guests').update({ status: 'bridge_failed', pending_marketing_data: finalPayload }).eq('id', stashedGuest.id);
                 }
             } else {
                 console.warn(`[Bridge Webhook] ⚠️ No stashed payload found for phone ${from}`);
@@ -426,12 +444,9 @@ async function handleRSVP(phone, status, contextId = null) {
   }
 
   // 2. PHASE 2: FALLBACK — Match by LAST INVITATION MESSAGE sent to this phone
-  //    This is far more accurate than matching by guest creation date, because it
-  //    directly links to the actual message the user is responding to.
   if (!targetGuestId) {
     console.log(`[Logic] Phase 2: Matching by last invitation message for suffix ${phoneSuffix}`);
     
-    // Find the most recent invitation message sent to this phone number
     const { data: lastInviteMsg } = await supabase
       .from('whatsapp_messages')
       .select('guest_id, event_id')
@@ -446,7 +461,6 @@ async function handleRSVP(phone, status, contextId = null) {
       targetEventId = lastInviteMsg.event_id;
       console.log(`[Invite Match] SUCCESS! Matched via last invitation msg → Guest: ${targetGuestId}, Event: ${targetEventId}`);
     } else {
-      // PHASE 3: Final fallback — use guest records sorted by creation date
       console.log(`[Logic] Phase 3: No invitation msgs found. Falling back to guest records...`);
       const { data: guestMatches } = await supabase
         .from('guests')
@@ -474,11 +488,13 @@ async function handleRSVP(phone, status, contextId = null) {
   
   const { data: guest } = await supabase.from('guests').select('*, events(name)').eq('id', targetGuestId).single();
   
-  // --- DEDUPLICATION GUARD ---
-  // Allow re-processing 'confirmed' status to let users re-request their cards if they lost them
-  // This also enables repeated testing on the same guest
-  if (guest?.rsvp_status === status && status !== 'confirmed') {
-    console.log(`[Webhook] Duplicate RSVP status (${status}) for guest ${targetGuestId}. Ignoring.`);
+  // --- TIME-BASED DEDUPLICATION GUARD ---
+  // Prevent immediate parallel webhook retries (within 30 seconds)
+  // But ALLOW legitimate user retries to resend the card later.
+  const lastUpdate = new Date(guest?.updated_at || 0).getTime();
+  const now = Date.now();
+  if ((guest?.rsvp_status === status || guest?.whatsapp_rsvp_status === status) && (now - lastUpdate < 30000)) {
+    console.log(`[Webhook] 🛑 Time-based deduplication caught! Status (${status}) recently processed for guest ${targetGuestId}. Ignoring parallel webhook.`);
     return;
   }
   

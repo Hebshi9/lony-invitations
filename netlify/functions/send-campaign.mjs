@@ -129,7 +129,8 @@ export const handler = async (eventReq, context) => {
                         }
                     };
                 } else {
-                    let mapCoords = encodeURIComponent(event.location_maps_url || eventLocation || 'قاعة الاحتفالات');
+                    let mapCoords = event.location_maps_url || eventLocation || 'قاعة الاحتفالات';
+                    mapCoords = mapCoords.trim();
                     let bodyParams = [];
                     let hasUrlButton = true;
                     

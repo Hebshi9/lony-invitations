@@ -14,7 +14,7 @@ const SITE_ID = 'f9577207-ba86-48e6-b64d-2517891c9140';
 const envVars = [
   { key: 'VITE_SUPABASE_URL', values: [{ value: 'https://gxunxhzjqclddoobxvpz.supabase.co', context: 'all' }] },
   { key: 'VITE_SUPABASE_ANON_KEY', values: [{ value: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd4dW54aHpqcWNsZGRvb2J4dnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MzAzNDMsImV4cCI6MjA4MDEwNjM0M30.OoOj_c7cqbsO_lzFKSM6hhPAg2F_F5gpRwBgDh74TXg', context: 'all' }] },
-  { key: 'META_ACCESS_TOKEN', values: [{ value: 'EAAV4hiaLibsBRn4mCPQ8sxJEyY5rXUaQ8xJhDuyBxVwkTnEx1ZArMK2YTZBuNROKsy0NBNUUUZBX77WrZAFfYMdMItbY7y5ESIwtS8KVwkpuhIq727wfmhC5biAWVuh6tbDkZAbNhFAc0yq0jZCCNebdZACCkZCOC76BzJZCa4Dwr4F7e0hIHZAI9rjdcPpVGJZAZBFEYrUPAYM2y5wDAk2REfWOgeEKrH6KvBQmufpbE6D36MOlFDG1TH3ZBWGB0PxyoCPuBr7ijZBuvFMOEiGOhEUsJaYITD', context: 'all' }] },
+  { key: 'META_ACCESS_TOKEN', values: [{ value: 'EAAV4hiaLibsBRrouDUKEcJYy8xhOLxI5YZA8WaQHZBHYFOZAJuuowyhWJm4mzRFPFR1F4byHCVC2pRXMdOj4ANNIY5NXwAiNHkAhpVDtUhTZCbU1JAwkwOEbMNb9xjWroKeKnT55coZCAhyGc6uvt2VzP0wYKGbMy5wxz1cXxzvoDzPZBAsbVlsoc9RAQaJnnxXwZDZD', context: 'all' }] },
   { key: 'META_PHONE_NUMBER_ID', values: [{ value: '1031606736708015', context: 'all' }] },
   { key: 'META_WABA_ID', values: [{ value: '3277627339072448', context: 'all' }] },
   { key: 'OPENAI_API_KEY', values: [{ value: 'sk-proj-REMOVED_FOR_SECURITY', context: 'all' }] },

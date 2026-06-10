@@ -48,7 +48,7 @@ export const handler = async (eventReq, context) => {
         const eventTime = event.event_time || event.settings?.event_time || '';
         const displayDate = eventTime ? `${eventDate} الساعة ${eventTime}` : eventDate;
         const eventLocation = event.location || event.location_name || 'الموقع';
-        const headerImage = event.settings?.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
+        const headerImage = body.headerImage || event.settings?.global_invite_image_url || 'https://lonyinvite.netlify.app/card-placeholder.png';
         const templateName = event.template_name || 'get_update';
 
         // 2. Fetch Targeted Guests
@@ -93,7 +93,7 @@ export const handler = async (eventReq, context) => {
                     results.push({ guestId: guest.id, success: false, error: 'Duplicate message within 24h', skipped: true });
                     continue;
                 }
-                
+
                 console.log(`[Pro Engine] Processing guest: ${guest.name} (${phone})`);
 
                 // --- BUILD PAYLOAD ---
@@ -128,46 +128,22 @@ export const handler = async (eventReq, context) => {
                         }
                     };
                 } else if (templateName.trim() === 'get_update' || true) { // FORCE GET_UPDATE FOR DEBUG
-                    // Specific logic for get_update with 3 buttons (2 QR + 1 URL)
-                    let mapCoords = '21.5433,39.1728'; // Default fallback
-                    let finalUrl = event.location_maps_url || '';
-                    
-                    if (finalUrl.includes('maps.app.goo.gl') || finalUrl.includes('goo.gl/maps')) {
-                        try {
-                            const res = await fetch(finalUrl, { method: 'HEAD', redirect: 'follow', timeout: 3000 });
-                            finalUrl = res.url;
-                        } catch (e) { console.error('Short URL resolution failed', e); }
-                    }
+                    // DIRECT LINK PASS-THROUGH - URL-encode coordinates for Meta URL button
+                    let mapCoords = encodeURIComponent(event.location_maps_url || eventLocation || 'قاعة الاحتفالات');
+                    const personalHeaderImage = headerImage;
 
-                    if (finalUrl) {
-                        const qMatch = finalUrl.match(/[?&](q|query)=([-.\d]+,[-.\d]+)/);
-                        const atMatch = finalUrl.match(/@([-.\d]+,[-.\d]+)/);
-                        const dMatch = finalUrl.match(/!3d([-.\d]+)!4d([-.\d]+)/);
-                        
-                        if (qMatch) {
-                            mapCoords = qMatch[2];
-                        } else if (atMatch) {
-                            mapCoords = atMatch[1];
-                        } else if (dMatch) {
-                            mapCoords = `${dMatch[1]},${dMatch[2]}`;
-                        } else {
-                            const coordMatch = finalUrl.match(/([-.\d]+,[-.\d]+)/);
-                            if (coordMatch) mapCoords = coordMatch[1];
-                        }
-                    }
-                    
                     payload = {
                         messaging_product: 'whatsapp', to: phone, type: 'template',
                         template: {
                             name: 'get_update', language: { code: 'ar' },
                             components: [
-                                { type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] },
+                                { type: 'header', parameters: [{ type: 'image', image: { link: personalHeaderImage } }] },
                                 {
                                     type: 'body', parameters: [
                                         { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
-                                        { type: 'text', parameter_name: 'groom_name', text: groomName }, 
-                                        { type: 'text', parameter_name: 'bride_name', text: brideName }, 
-                                        { type: 'text', parameter_name: 'event_date', text: displayDate }, 
+                                        { type: 'text', parameter_name: 'groom_name', text: groomName },
+                                        { type: 'text', parameter_name: 'bride_name', text: brideName },
+                                        { type: 'text', parameter_name: 'event_date', text: displayDate },
                                         { type: 'text', parameter_name: 'event_location', text: eventLocation }
                                     ]
                                 },
@@ -189,8 +165,8 @@ export const handler = async (eventReq, context) => {
                                     type: 'body', parameters: [
                                         { type: 'text', parameter_name: 'guest_name', text: String(guest.name || 'ضيفنا').trim() },
                                         { type: 'text', parameter_name: 'bride_name', text: brideName },
-                                        { type: 'text', parameter_name: 'groom_name', text: groomName }, 
-                                        { type: 'text', parameter_name: 'event_date', text: eventDate }, 
+                                        { type: 'text', parameter_name: 'groom_name', text: groomName },
+                                        { type: 'text', parameter_name: 'event_date', text: eventDate },
                                         { type: 'text', parameter_name: 'event_location', text: eventLocation }
                                     ]
                                 },
@@ -214,13 +190,16 @@ export const handler = async (eventReq, context) => {
                 if (metaRes.ok) {
                     activeStats.sent++;
                     const { error: insertError } = await supabase.from('whatsapp_messages').insert([{
-                        guest_id: guest.id, 
-                        event_id: eventId, 
-                        status: 'sent', 
+                        guest_id: guest.id,
+                        event_id: eventId,
+                        phone: phone,
+                        status: 'sent',
+                        delivery_status: 'sent',
                         evolution_message_id: metaData.messages?.[0]?.id,
-                        message_phase: isReminder ? 'reminder' : (isQR ? 'qr_code' : 'invitation')
+                        message_phase: isReminder ? 'reminder' : (isQR ? 'qr_code' : 'invitation'),
+                        message_text: isReminder ? 'تذكير' : (isQR ? 'بطاقة دخول' : 'دعوة رسمية')
                     }]);
-                    
+
                     if (insertError) {
                         console.error(`[DB Error] Failed to log message for ${guest.name}:`, insertError);
                         // LOG ERROR TO WEBHOOK LOGS FOR VISIBILITY
@@ -297,10 +276,10 @@ export const handler = async (eventReq, context) => {
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                success: true, 
+            body: JSON.stringify({
+                success: true,
                 stats: activeStats,
-                results: results 
+                results: results
             })
         };
 

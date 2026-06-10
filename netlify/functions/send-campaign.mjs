@@ -241,7 +241,10 @@ export const handler = async (eventReq, context) => {
                             messaging_product: 'whatsapp', to: phone, type: 'template',
                             template: {
                                 name: 'lony_invite_bridge', language: { code: 'ar' },
-                                components: [{ type: 'body', parameters: [{ type: 'text', text: guest.name }, { type: 'text', text: groomName }] }]
+                                components: [
+                                    { type: 'body', parameters: [{ type: 'text', parameter_name: 'guest_name', text: guest.name }, { type: 'text', parameter_name: 'sender_name', text: groomName }] },
+                                    { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: 'BRIDGE_OK' }] }
+                                ]
                             }
                         };
                         const bRes = await fetch(`https://graph.facebook.com/v21.0/${process.env.META_PHONE_NUMBER_ID}/messages`, {
